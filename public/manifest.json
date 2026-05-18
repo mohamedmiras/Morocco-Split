@@ -1,0 +1,18 @@
+{
+  "short_name": "Expense MA",
+  "name": "Expense Morocco Manager",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "type": "image/svg+xml",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#ffffff",
+  "display": "standalone",
+  "scope": "/",
+  "theme_color": "#2563eb",
+  "description": "Moroccan Expense Split & Management Application"
+}
