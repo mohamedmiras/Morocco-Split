@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Link } from 'react-router-dom';
-import { TrendingUp, TrendingDown, Wallet, ArrowUpRight, ArrowDownLeft, User, FileText, Hash, Calendar, Edit3, Loader2, ChevronDown, Check, Home, Clock, Users, Camera, Trash2, ArrowRightLeft } from 'lucide-react';
+import { TrendingUp, TrendingDown, Wallet, ArrowUpRight, ArrowDownLeft, User, FileText, Hash, Calendar, Edit3, Loader2, ChevronDown, Check, Home, Clock, Users, Camera, Trash2, ArrowRightLeft, Download } from 'lucide-react';
 import Navbar from '../components/Navbar';
 import Sidebar from '../components/Sidebar';
 import SettingsModal from '../components/SettingsModal';
@@ -22,12 +22,34 @@ export default function Dashboard() {
   
   const [expenses, setExpenses] = useState([]);
   const [loadingExpenses, setLoadingExpenses] = useState(true);
-  const [isDebugOpen, setIsDebugOpen] = useState(false);
   const [isEndorseModalOpen, setIsEndorseModalOpen] = useState(false);
   const [pendingEndorsements, setPendingEndorsements] = useState([]);
   const [isEndorseActionLoading, setIsEndorseActionLoading] = useState(false);
   const [showAllIndividualTransactions, setShowAllIndividualTransactions] = useState(false);
   const [showAllRoomTransactions, setShowAllRoomTransactions] = useState(false);
+
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
+
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+  }, []);
+
+  const handleInstallApp = async () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      if (outcome === 'accepted') {
+        setDeferredPrompt(null);
+      }
+    } else {
+      alert("To install on iOS: tap the 'Share' button at the bottom of Safari, then select 'Add to Home Screen'.\n\nOn Android: tap the menu icon in Chrome and select 'Add to Home screen'.");
+    }
+  };
 
   const fetchExpenses = async () => {
     if (!user) return;
@@ -657,174 +679,16 @@ export default function Dashboard() {
         onClose={() => setIsSettingsOpen(false)}
       />
 
-      {/* Developer Math Audit Toggle Button */}
+      {/* Add to Home Screen Button */}
       <div className="fixed bottom-6 right-6 z-40">
         <button
-          onClick={() => setIsDebugOpen(true)}
-          className="flex items-center gap-2 px-4 py-2.5 bg-slate-900 text-white rounded-xl shadow-xl hover:bg-slate-800 hover:shadow-2xl hover:scale-105 active:scale-95 transition-all text-[11px] font-black border border-slate-700/50 cursor-pointer"
+          onClick={handleInstallApp}
+          className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-xl shadow-[0_8px_30px_rgb(37,99,235,0.3)] hover:bg-blue-700 hover:shadow-[0_8px_30px_rgb(37,99,235,0.4)] hover:-translate-y-0.5 active:translate-y-0 transition-all text-[11px] font-black border border-blue-500 cursor-pointer"
         >
-          <span className="relative flex h-2 w-2">
-            <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${globalInvariant.isLedgerBalanced ? 'bg-emerald-400' : 'bg-rose-400'}`}></span>
-            <span className={`relative inline-flex rounded-full h-2 w-2 ${globalInvariant.isLedgerBalanced ? 'bg-emerald-500' : 'bg-rose-500'}`}></span>
-          </span>
-          🔍 Math Audit Panel
+          <Download size={14} strokeWidth={2.5} />
+          Install App
         </button>
       </div>
-
-      {/* Developer Math Audit Panel Drawer */}
-      <AnimatePresence>
-        {isDebugOpen && (
-          <>
-            {/* Backdrop */}
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setIsDebugOpen(false)}
-              className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50"
-            />
-            {/* Drawer */}
-            <motion.div
-              initial={{ y: "100%" }}
-              animate={{ y: 0 }}
-              exit={{ y: "100%" }}
-              transition={{ type: "spring", damping: 25, stiffness: 200 }}
-              className="fixed bottom-0 inset-x-0 bg-slate-900 text-slate-100 rounded-t-[2.5rem] shadow-2xl z-50 max-h-[85vh] overflow-hidden flex flex-col border-t border-slate-800/80 font-sans"
-            >
-              {/* Header */}
-              <div className="px-6 py-5 border-b border-slate-800 flex items-center justify-between bg-slate-950/40">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-2xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400">
-                    <TrendingUp size={20} strokeWidth={2.5} />
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-black uppercase tracking-wider text-slate-100 flex items-center gap-2">
-                      Ledger Math Audit Panel
-                      <span className="px-2 py-0.5 text-[9px] font-black rounded bg-blue-900/40 text-blue-400 border border-blue-800/50">DEV CONSOLE</span>
-                    </h3>
-                    <p className="text-[10px] text-slate-400 mt-0.5">Real-time enterprise arithmetic & double-entry integrity tracking</p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => setIsDebugOpen(false)}
-                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-[10px] text-slate-300 font-bold rounded-xl transition-all cursor-pointer border border-slate-700/50"
-                >
-                  Close Console
-                </button>
-              </div>
-
-              {/* Scrollable Audit Workspace */}
-              <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar bg-slate-950/20">
-                {/* Stats Grid */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {/* Status Card */}
-                  <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-4 flex flex-col justify-between">
-                    <div>
-                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Ecosystem Invariant</p>
-                      <h4 className={`text-xl font-black mt-2 flex items-center gap-2 ${globalInvariant.isLedgerBalanced ? 'text-emerald-400' : 'text-rose-400'}`}>
-                        {globalInvariant.isLedgerBalanced ? '✅ PERFECT' : '⚠️ MISMATCHED'}
-                      </h4>
-                    </div>
-                    <p className="text-[10px] text-slate-400 mt-4 leading-relaxed">
-                      Sum of all student balances is <span className="font-extrabold text-slate-200">{globalInvariant.allUsersSum.toFixed(4)} DH</span>. 
-                      In double-entry split models, this sum must equal 0.00 exactly.
-                    </p>
-                  </div>
-
-                  {/* Transaction Audited Card */}
-                  <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-4 flex flex-col justify-between">
-                    <div>
-                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Audited Documents</p>
-                      <h4 className="text-xl font-black text-blue-400 mt-2">
-                        {globalInvariant.totalTransactionsChecked} <span className="text-[10px] font-bold text-slate-400">expenses</span>
-                      </h4>
-                    </div>
-                    <p className="text-[10px] text-slate-400 mt-4 leading-relaxed">
-                      Every Firestore expense document was recalculated and compared against individual user participant weights.
-                    </p>
-                  </div>
-
-                  {/* Integrity Exceptions Card */}
-                  <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-4 flex flex-col justify-between">
-                    <div>
-                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Validation Discrepancies</p>
-                      <h4 className={`text-xl font-black mt-2 ${globalInvariant.totalDiscrepancies === 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                        {globalInvariant.totalDiscrepancies} <span className="text-[10px] font-bold text-slate-400">exceptions</span>
-                      </h4>
-                    </div>
-                    <p className="text-[10px] text-slate-400 mt-4 leading-relaxed">
-                      Number of historical expenses that contain floating-point penny discrepancies (e.g. legacy rounded values).
-                    </p>
-                  </div>
-                </div>
-
-                {/* Ledger Balances Listing */}
-                <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-4 space-y-3">
-                  <h4 className="text-[10px] font-black uppercase text-slate-300 tracking-wider">Active System Ledger Balance Map</h4>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                    {Object.entries(globalInvariant.systemBalances).map(([uid, balance]) => {
-                      const profile = studentsData.find(s => s['رقم  ت']?.toString() === uid?.toString()) || 
-                                      ROOM_DATA.find(r => `room-${r.roomNo}` === uid);
-                      const displayName = profile ? (profile.name || profile['الإسم الشخصي'] || `Room ${profile.roomNo}`) : `ID: ${uid}`;
-                      
-                      return (
-                        <div key={uid} className="bg-slate-950/40 border border-slate-800/50 p-2.5 rounded-xl flex flex-col justify-between">
-                          <p className="text-[10px] font-bold text-slate-300 truncate">{displayName}</p>
-                          <p className={`text-[12px] font-black mt-1 ${balance > 0.005 ? 'text-emerald-400' : balance < -0.005 ? 'text-rose-400' : 'text-slate-400'}`}>
-                            {balance > 0 ? '+' : ''}{balance.toFixed(2)} DH
-                          </p>
-                        </div>
-                      );
-                    })}
-                    {Object.keys(globalInvariant.systemBalances).length === 0 && (
-                      <p className="text-[10px] text-slate-500 py-2 col-span-full text-center">No active unsettled transactions to balance.</p>
-                    )}
-                  </div>
-                </div>
-
-                {/* Arithmetic Audit Logs Table */}
-                <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl overflow-hidden">
-                  <div className="px-4 py-3 bg-slate-900 border-b border-slate-800 flex items-center justify-between">
-                    <h4 className="text-[10px] font-black uppercase text-slate-300 tracking-wider">Historical Arithmetic Audit Trail</h4>
-                    <span className="text-[9px] font-bold text-slate-500">Live checks on save</span>
-                  </div>
-                  <div className="divide-y divide-slate-800/50 overflow-x-auto max-h-[300px] custom-scrollbar">
-                    {auditLogs.map((log) => (
-                      <div key={log.id} className="px-4 py-3 flex items-center justify-between text-[11px] hover:bg-slate-800/30 transition-colors gap-4 min-w-[500px]">
-                        <div className="w-[30%] shrink-0">
-                          <p className="font-extrabold text-slate-200 truncate">{log.description}</p>
-                          <p className="text-[9px] text-slate-500 font-medium mt-0.5">{log.date}</p>
-                        </div>
-                        <div className="flex-1 flex items-center justify-end gap-6 text-right">
-                          <div>
-                            <p className="text-[9px] font-bold text-slate-500">Expected Total</p>
-                            <p className="font-black text-slate-300">{log.expectedTotal.toFixed(2)} DH</p>
-                          </div>
-                          <div>
-                            <p className="text-[9px] font-bold text-slate-500">Sum of Splits</p>
-                            <p className="font-black text-slate-300">{log.actualTotal.toFixed(2)} DH</p>
-                          </div>
-                          <div>
-                            <p className="text-[9px] font-bold text-slate-500">Discrepancy</p>
-                            <p className={`font-black ${Math.abs(log.diff) > 0.001 ? 'text-rose-400' : 'text-slate-500'}`}>
-                              {log.diff > 0 ? '+' : ''}{log.diff.toFixed(2)} DH
-                            </p>
-                          </div>
-                          <span className={`px-2 py-0.5 text-[8px] font-black rounded-full uppercase tracking-wider shrink-0 ${
-                            log.isValid ? 'bg-emerald-950 text-emerald-400 border border-emerald-800/35' : 'bg-rose-950 text-rose-400 border border-rose-800/35'
-                          }`}>
-                            {log.isValid ? 'VERIFIED' : 'MISMATCH'}
-                          </span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
     </div>
   );
 }
