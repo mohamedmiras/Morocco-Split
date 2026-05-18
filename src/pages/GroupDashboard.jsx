@@ -1,15 +1,16 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ArrowLeft, Users, Receipt, TrendingUp, Plus } from 'lucide-react';
+import { ArrowLeft, Users, Receipt, TrendingUp, Plus, Edit3 } from 'lucide-react';
 import Navbar from '../components/Navbar';
 import Sidebar from '../components/Sidebar';
 import { useAuthStore } from '../store/authStore';
 import { db } from '../lib/firebase';
-import { doc, getDoc, collection, query, where, onSnapshot, orderBy } from 'firebase/firestore';
+import { doc, collection, query, where, onSnapshot, orderBy } from 'firebase/firestore';
 import GroupMembersGrid from '../components/groups/GroupMembersGrid';
 import GroupActivityFeed from '../components/groups/GroupActivityFeed';
 import SplitExpenseModal from '../components/split/SplitExpenseModal';
+import EditGroupModal from '../components/groups/EditGroupModal';
 import { safeAdd, safeSubtract } from '../lib/financialMath';
 
 export default function GroupDashboard() {
@@ -20,19 +21,18 @@ export default function GroupDashboard() {
   const [expenses, setExpenses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isSplitModalOpen, setIsSplitModalOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
 
   useEffect(() => {
     if (!groupId) return;
     
-    // Fetch group details
-    const fetchGroup = async () => {
-      const docRef = doc(db, 'groups', groupId);
-      const docSnap = await getDoc(docRef);
+    // Listen to group details
+    const groupRef = doc(db, 'groups', groupId);
+    const unsubGroup = onSnapshot(groupRef, (docSnap) => {
       if (docSnap.exists()) {
         setGroup({ id: docSnap.id, ...docSnap.data() });
       }
-    };
-    fetchGroup();
+    });
 
     // Listen to group expenses
     const q = query(
@@ -50,7 +50,10 @@ export default function GroupDashboard() {
       setLoading(false);
     });
 
-    return () => unsub();
+    return () => {
+      unsubGroup();
+      unsub();
+    };
   }, [groupId]);
 
   const { totalExpenses, totalSettlements, memberBalances, simplifiedDebts } = useMemo(() => {
@@ -182,7 +185,18 @@ export default function GroupDashboard() {
                       </div>
                    )}
                   <div>
-                    <h1 className="text-lg sm:text-2xl font-black text-slate-900 tracking-tight leading-tight">{group.name}</h1>
+                    <div className="flex items-center gap-2">
+                      <h1 className="text-lg sm:text-2xl font-black text-slate-900 tracking-tight leading-tight">{group.name}</h1>
+                      {(group.createdBy === user?.student_id?.toString() || group.createdBy === user?.id?.toString()) && (
+                        <button 
+                          onClick={() => setIsEditModalOpen(true)}
+                          className="p-1 text-slate-400 hover:text-blue-600 rounded-lg hover:bg-slate-100 transition-all cursor-pointer flex items-center justify-center shrink-0"
+                          title="Edit members"
+                        >
+                          <Edit3 size={15} />
+                        </button>
+                      )}
+                    </div>
                     <p className="text-[10px] sm:text-[12px] text-slate-500 font-bold">{group.members?.length || 0} Members</p>
                   </div>
                 </div>
@@ -233,6 +247,14 @@ export default function GroupDashboard() {
           onClose={() => setIsSplitModalOpen(false)}
           preselectedGroupId={group.id}
           groupMembers={group.members}
+        />
+      )}
+
+      {isEditModalOpen && (
+        <EditGroupModal 
+          isOpen={isEditModalOpen}
+          onClose={() => setIsEditModalOpen(false)}
+          group={group}
         />
       )}
     </div>

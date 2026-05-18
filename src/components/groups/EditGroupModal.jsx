@@ -1,0 +1,239 @@
+import { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { X, Search, Check, Loader2 } from 'lucide-react';
+import { useAuthStore } from '../../store/authStore';
+import { db } from '../../lib/firebase';
+import { doc, updateDoc } from 'firebase/firestore';
+import studentsData from '../../data/students.json';
+import { ROOM_DATA } from '../../data/rooms';
+
+const ARABIC_TO_ENGLISH_NAMES = {
+  "عبد الحسيب": "Abdul Haseeb",
+  "سيد أنور أحمد": "Sayyid Anwar Ahmad",
+  "سيد حسين علي": "Sayyid Hussain Ali",
+  "محمد نجيب الدين": "Muhammad Najeebuddin",
+  "غفران الحق أنصار الحق": "Ghufranul Haq Ansarul Haq",
+  "أشرف ألفنة": "Alfina",
+  "حسن أنشاد": "Hasan Anshad",
+  "حسين محمد ذاكر": "Hussain Muhammad Zakir",
+  "صافية جاسمن": "Safia Jasmin",
+  "محمد سنان": "Muhammad Sinan",
+  "خان راشد": "Khan Rashid",
+  "كلرتكل الأمين": "Kalarikkal Al Ameen",
+  "محمد مراس": "Muhammad Miras",
+  "رمل أبو بكر": "Ramal Abu Bakr",
+  "محمد نهال": "Muhammad Nihal",
+  "فاطمة هبة": "Fatima Hiba",
+  "مندودن حسنة": "Mundodan Hasna",
+  "عبد المرشد": "Abdul Murshid",
+  "أشرف": "Ashraf",
+  "محمد رميس": "Muhammad Ramees",
+  "أحمد فارس": "Ahmad Faris",
+  "محمد سهيل فاركود": "Muhammad Suhail Varkkod",
+  "محمد جاسم فرمبن": "Muhammad Jassim Paramban",
+  "محمد هرشاد": "Muhammad Harshad",
+  "صالح فوتافرمبت": "Salih Pootaparambil",
+  "محمد رئيس": "Muhammad Raees",
+  "جوهر رزا": "Jauhar Raza",
+  "مشاهد رزا": "Mushahid Raza",
+  "فاطمة رشاء": "Fatima Rasha",
+  "نيرول أس كى": "Niroul S K",
+  "عثمان نعمة الله تديل تشريا": "Usman Niamatullah Thekkil Cheriya",
+  "محمد طيب": "Muhammad Tayyib",
+  "محمد يس تودنكل": "Muhammad Yaseen Thodungil",
+  "محمد منور": "Muhammad Munawwar",
+  "محمد يونس": "Muhammad Younus",
+  "محمد أجواد": "Muhammad Ajwad",
+  "محمد شكير": "Muhammad Shakeer",
+  "الأمين": "Al Ameen",
+  "محمد مدلاج": "Muhammad Midlaj",
+  "أحمد علي": "Ahmad Ali"
+};
+
+const formatName = (rawName) => {
+  const englishName = ARABIC_TO_ENGLISH_NAMES[rawName] || rawName;
+  return englishName
+    .replace(/\bMuhammad\b/gi, 'Md.')
+    .replace(/\bMohammed\b/gi, 'Md.')
+    .replace(/\bMuhammed\b/gi, 'Md.');
+};
+
+export default function EditGroupModal({ isOpen, onClose, group, onGroupUpdated }) {
+  const user = useAuthStore((state) => state.user);
+  const [selectedMembers, setSelectedMembers] = useState([]);
+  const [search, setSearch] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  // Initialize selected members from current group members
+  useEffect(() => {
+    if (isOpen && group) {
+      setSelectedMembers(group.members || []);
+      setSearch('');
+    }
+  }, [isOpen, group]);
+
+  if (!isOpen || !group) return null;
+
+  const loggedInStudentId = parseInt(user?.student_id);
+  const GIRL_IDS = [6, 9, 16, 17, 29];
+  const ALLOWED_BOY_IDS = [4, 18, 34];
+
+  const displayItems = user?.role === 'room' 
+    ? ROOM_DATA.map(r => ({
+        'رقم  ت': `room${r.roomNo}`,
+        'الإسم الشخصي': `Room ${r.roomNo}`
+      }))
+    : studentsData;
+
+  const filteredStudents = displayItems.filter(s => {
+    const englishName = user?.role === 'room' ? s['الإسم الشخصي'] : formatName(s['الإسم الشخصي'] || '');
+    if (search) {
+      if (!englishName.toLowerCase().includes(search.toLowerCase())) return false;
+    }
+
+    if (user?.role === 'room') {
+      return true;
+    }
+
+    const studentId = parseInt(s['رقم  ت']);
+    
+    // Apply gender filtering rules:
+    if (GIRL_IDS.includes(loggedInStudentId)) {
+      if (!GIRL_IDS.includes(studentId)) return false;
+    } else if (ALLOWED_BOY_IDS.includes(loggedInStudentId)) {
+      // Allowed boys can see everyone
+    } else {
+      // Other boys cannot see girls
+      if (GIRL_IDS.includes(studentId)) return false;
+    }
+
+    return true;
+  });
+
+  const toggleMember = (student) => {
+    const uid = student['رقم  ت']?.toString();
+    const sName = formatName(student['الإسم الشخصي']);
+    
+    if (selectedMembers.find(m => m.uid === uid)) {
+      // Cannot remove group creator
+      if (uid === group.createdBy) return;
+      setSelectedMembers(prev => prev.filter(m => m.uid !== uid));
+    } else {
+      setSelectedMembers(prev => [...prev, { uid, name: sName }]);
+    }
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (selectedMembers.length < 2) return;
+
+    setLoading(true);
+    try {
+      const docRef = doc(db, 'groups', group.id);
+      await updateDoc(docRef, {
+        members: selectedMembers,
+        memberUids: selectedMembers.map(m => m.uid)
+      });
+      if (onGroupUpdated) onGroupUpdated();
+      onClose();
+    } catch (err) {
+      console.error(err);
+      alert("Failed to update group members");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={onClose} />
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.95, y: 10 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.95, y: 10 }}
+        className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden relative z-10 flex flex-col max-h-[90vh]"
+      >
+        <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-white sticky top-0 z-10">
+          <div>
+            <h2 className="text-lg font-black text-slate-800 tracking-tight">Edit Group Members</h2>
+            <p className="text-[11px] text-slate-500 font-medium">Add or remove members for {group.name}</p>
+          </div>
+          <button type="button" onClick={onClose} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><X size={18} className="text-slate-500" strokeWidth={2.5} /></button>
+        </div>
+
+        <div className="p-5 overflow-y-auto">
+          <form onSubmit={handleSubmit} className="space-y-5">
+            <div>
+              <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Add / Remove Members</label>
+              <div className="relative mb-3">
+                <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input 
+                  type="text" 
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  placeholder="Search by name..." 
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium transition-shadow"
+                />
+              </div>
+
+              <div className="bg-white border border-slate-200 rounded-xl shadow-sm max-h-52 overflow-y-auto mb-4 custom-scrollbar">
+                {filteredStudents.length === 0 ? (
+                  <div className="p-3 text-xs text-slate-500 text-center font-medium">No students found.</div>
+                ) : filteredStudents.map(student => {
+                  const uid = student['رقم  ت']?.toString();
+                  const isSelected = selectedMembers.some(m => m.uid === uid);
+                  const isCreator = uid === group.createdBy;
+                  const englishName = formatName(student['الإسم الشخصي'] || '');
+                  return (
+                    <div 
+                      key={uid} 
+                      onClick={() => toggleMember(student)}
+                      className={`p-2.5 flex items-center justify-between cursor-pointer border-b border-slate-50 last:border-0 hover:bg-slate-50 transition-colors ${isSelected ? 'bg-blue-50/50' : ''}`}
+                    >
+                      <div className="flex flex-col">
+                        <span className="text-[13px] font-bold text-slate-700">{englishName}</span>
+                        {isCreator && <span className="text-[9px] text-slate-400 font-bold">Group Creator (Locked)</span>}
+                      </div>
+                      {isSelected && <Check size={14} className="text-blue-600" strokeWidth={3} />}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Selected Members Chips */}
+              <div className="space-y-2 mt-4">
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Selected Members ({selectedMembers.length})</label>
+                <div className="flex flex-wrap gap-1.5">
+                  {selectedMembers.map(m => {
+                    const isCreator = m.uid === group.createdBy;
+                    return (
+                      <div key={m.uid} className="bg-indigo-50 border border-indigo-100 text-indigo-700 px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1">
+                        {m.name}
+                        {!isCreator && (
+                          <button type="button" onClick={() => toggleMember({'رقم  ت': m.uid, 'الإسم الشخصي': m.name})} className="text-indigo-400 hover:text-red-500 transition-colors ml-0.5">
+                            <X size={12} strokeWidth={3} />
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-2 border-t border-slate-100 flex items-center justify-end gap-3 sticky bottom-0 bg-white">
+              <button type="button" onClick={onClose} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold rounded-xl transition-colors">Cancel</button>
+              <button 
+                type="submit" 
+                disabled={loading || selectedMembers.length < 2} 
+                className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl transition-all shadow-[0_4px_12px_rgba(37,99,235,0.15)] hover:shadow-lg flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {loading ? <Loader2 size={14} className="animate-spin" /> : 'Save Changes'}
+              </button>
+            </div>
+          </form>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
