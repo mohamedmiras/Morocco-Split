@@ -516,6 +516,45 @@ export default function Dashboard() {
     }
   };
 
+  const handleClearAllData = async () => {
+    if (!window.confirm("Are you sure you want to delete all expenses, groups, and settlements? This will wipe out all sample testing data!")) return;
+    try {
+      setLoadingExpenses(true);
+      
+      // 1. Fetch and delete all expenses
+      const expSnap = await getDocs(collection(db, 'expenses'));
+      if (expSnap.docs.length > 0) {
+        const batch1 = writeBatch(db);
+        expSnap.docs.forEach(doc => batch1.delete(doc.ref));
+        await batch1.commit();
+      }
+
+      // 2. Fetch and delete all groups
+      const groupSnap = await getDocs(collection(db, 'groups'));
+      if (groupSnap.docs.length > 0) {
+        const batch2 = writeBatch(db);
+        groupSnap.docs.forEach(doc => batch2.delete(doc.ref));
+        await batch2.commit();
+      }
+
+      // 3. Fetch and delete all endorsements
+      const endSnap = await getDocs(collection(db, 'endorsements'));
+      if (endSnap.docs.length > 0) {
+        const batch3 = writeBatch(db);
+        endSnap.docs.forEach(doc => batch3.delete(doc.ref));
+        await batch3.commit();
+      }
+
+      alert("All sample data cleared successfully! The page will now reload.");
+      window.location.reload();
+    } catch (err) {
+      console.error(err);
+      alert("Failed to clear data: " + err.message);
+    } finally {
+      setLoadingExpenses(false);
+    }
+  };
+
   const isRoomUser = user?.role === 'room';
   const rawStudentDetails = studentsData.find(s => s['رقم  ت']?.toString() === user?.student_id?.toString()) || {};
   const myRoom = isRoomUser ? ROOM_DATA.find(r => r.roomNo === user.roomNo) : null;
@@ -543,6 +582,12 @@ export default function Dashboard() {
                 <h1 className="text-xl font-extrabold text-slate-900 tracking-tight">Overview</h1>
                 <p className="text-[12px] text-slate-500 mt-0.5 font-medium">Track your shared expenses in one place.</p>
               </div>
+              <button 
+                onClick={handleClearAllData}
+                className="px-3 py-1.5 bg-red-50 hover:bg-red-100 active:scale-95 text-red-600 text-[10px] font-bold rounded-xl transition-all uppercase tracking-wider shadow-sm border border-red-100 flex items-center gap-1.5"
+              >
+                Clear Sample Data
+              </button>
             </motion.div>
 
             {(displayDetails.name !== 'Unknown') && (
