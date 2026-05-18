@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { LogIn, KeyRound, Loader2, WalletCards, User } from 'lucide-react';
+import { LogIn, KeyRound, Loader2, WalletCards, User, Download } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { auth, db } from '../lib/firebase';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
@@ -14,9 +14,31 @@ export default function Login() {
  const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [networkStatus, setNetworkStatus] = useState('checking'); // 'checking', 'ok', 'blocked'
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
   const navigate = useNavigate();
   const setUser = useAuthStore((state) => state.setUser);
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+  }, []);
+
+  const handleInstallApp = async () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      if (outcome === 'accepted') {
+        setDeferredPrompt(null);
+      }
+    } else {
+      alert("To install on iOS: tap the 'Share' button at the bottom of Safari, then select 'Add to Home Screen'.\n\nOn Android: tap the menu icon in Chrome and select 'Add to Home screen'.");
+    }
+  };
 
   useEffect(() => {
     // 1. Connection check (bypassed for Firebase as it's generally unblocked)
@@ -239,7 +261,19 @@ export default function Login() {
           </div>
  
  </div>
+ </div>
  </motion.div>
+
+      {/* Add to Home Screen Button */}
+      <div className="fixed bottom-6 right-6 z-40">
+        <button
+          onClick={handleInstallApp}
+          className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-xl shadow-[0_8px_30px_rgb(37,99,235,0.3)] hover:bg-blue-700 hover:shadow-[0_8px_30px_rgb(37,99,235,0.4)] hover:-translate-y-0.5 active:translate-y-0 transition-all text-[11px] font-black border border-blue-500 cursor-pointer"
+        >
+          <Download size={14} strokeWidth={2.5} />
+          Install App
+        </button>
+      </div>
  </div>
  );
 }
