@@ -1,0 +1,1259 @@
+import { useState, useEffect, useMemo, useRef } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Link } from 'react-router-dom';
+import { TrendingUp, TrendingDown, Wallet, ArrowUpRight, ArrowDownLeft, User, FileText, Hash, Calendar, Edit3, Loader2, ChevronDown, Check, Home, Clock, Users, Camera, Trash2, ArrowRightLeft } from 'lucide-react';
+import Navbar from '../components/Navbar';
+import Sidebar from '../components/Sidebar';
+import SettingsModal from '../components/SettingsModal';
+import SplitExpenseModal from '../components/split/SplitExpenseModal';
+import EndorseDebtModal from '../components/endorsement/EndorseDebtModal';
+import { useAuthStore } from '../store/authStore';
+import studentsData from '../data/students.json';
+import { db } from '../lib/firebase';
+import { collection, query, getDocs, orderBy, updateDoc, doc, setDoc, writeBatch, onSnapshot, where } from 'firebase/firestore';
+import { ROOM_DATA } from '../data/rooms';
+import imageCompression from 'browser-image-compression';
+import { safeRound, safeAdd, safeSubtract, safeSum } from '../lib/financialMath';
+
+export default function Dashboard() {
+  const user = useAuthStore((state) => state.user);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isSplitModalOpen, setIsSplitModalOpen] = useState(false);
+  
+  const [expenses, setExpenses] = useState([]);
+  const [loadingExpenses, setLoadingExpenses] = useState(true);
+  const [isDebugOpen, setIsDebugOpen] = useState(false);
+  const [isEndorseModalOpen, setIsEndorseModalOpen] = useState(false);
+  const [pendingEndorsements, setPendingEndorsements] = useState([]);
+  const [isEndorseActionLoading, setIsEndorseActionLoading] = useState(false);
+  const [showAllIndividualTransactions, setShowAllIndividualTransactions] = useState(false);
+  const [showAllRoomTransactions, setShowAllRoomTransactions] = useState(false);
+
+  const fetchExpenses = async () => {
+    if (!user) return;
+    setLoadingExpenses(true);
+    try {
+      const q = query(collection(db, 'expenses'), orderBy('created_at', 'desc'));
+      const querySnapshot = await getDocs(q);
+      const fetched = querySnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setExpenses(fetched);
+    } catch (err) {
+      console.error("Error fetching expenses:", err);
+    } finally {
+      setLoadingExpenses(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchExpenses();
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    const q = query(
+      collection(db, 'endorsements'),
+      where('status', '==', 'pending_c'),
+      where('newCreditorUid', '==', user?.id?.toString())
+    );
+    const unsub = onSnapshot(q, (snapshot) => {
+      const reqs = [];
+      snapshot.forEach(doc => reqs.push({ id: doc.id, ...doc.data() }));
+      setPendingEndorsements(reqs);
+    });
+    return () => unsub();
+  }, [user]);
+
+  const formatDateToDMY = (dateStr) => {
+    if (!dateStr || dateStr === 'Unknown Date') return dateStr;
+    const parts = dateStr.split('-');
+    if (parts.length === 3 && parts[0].length === 4) {
+      const monthMap = {
+        '01': 'JAN', '02': 'FEB', '03': 'MAR', '04': 'APR',
+        '05': 'MAY', '06': 'JUN', '07': 'JUL', '08': 'AUG',
+        '09': 'SEP', '10': 'OCT', '11': 'NOV', '12': 'DEC'
+      };
+      const day = parts[2];
+      const monthDigit = parts[1];
+      const year = parts[0];
+      const monthName = monthMap[monthDigit] || monthDigit;
+      return `${day}-${monthName}-${year}`;
+    }
+    return dateStr;
+  };
+
+  const { individualStats, roomStats } = useMemo(() => {
+    const emptyStats = { totalOwe: 0, totalOwed: 0, netBalance: 0, transactionsList: [], oweDetails: [], owedDetails: [], pendingIncoming: [], pendingOutgoing: [] };
+    if (!user) return { individualStats: emptyStats, roomStats: emptyStats };
+
+    const processExpenses = (targetSplitType) => {
+        const txList = [];
+        const balancesMap = {}; 
+        const pendingIn = [];
+        const pendingOut = [];
+
+        const myRoom = user.role === 'room' ? ROOM_DATA.find(r => r.roomNo === user.roomNo) : null;
+        const myRoomMemberNames = myRoom ? myRoom.members.map(m => m.toLowerCase()) : [];
+
+        expenses.forEach(exp => {
+          const currentSplitType = exp.split_type || 'individual';
+          if (currentSplitType !== targetSplitType) return;
+
+          const isDocCompleted = exp.status === 'completed';
+          const isDocPending = exp.status === 'pending_settlement';
+
+          const isPayer = exp.paid_by_uid === user.id || (user.role === 'room' && myRoomMemberNames.includes((exp.paid_by_name || '').toLowerCase()));
+          const desc = exp.description || 'Shared Expense';
+
+          exp.participants?.forEach(p => {
+            if (p.uid === exp.paid_by_uid) return; 
+            if (!p.amount || p.amount <= 0) return;
+
+            const isBorrowerRoomMember = user.role === 'room' && myRoomMemberNames.includes((p.name || '').toLowerCase());
+            const isBorrower = p.uid === user.id || isBorrowerRoomMember;
+
+            const isCompleted = p.status === 'completed' || isDocCompleted;
+            const isPending = p.status === 'pending_settlement' || isDocPending;
+
+            // Group by Room IDs and Room Names if target is a room-wise split
+            let displayBorrowerUid = p.uid;
+            let displayBorrowerName = p.name || 'Unknown User';
+            let displayLenderUid = exp.paid_by_uid;
+            let displayLenderName = exp.paid_by_name || 'Other User';
+
+            if (targetSplitType === 'room') {
+              const borrowerRoom = ROOM_DATA.find(r => r.members.some(m => m.toLowerCase() === (p.name || '').toLowerCase()));
+              if (borrowerRoom) {
+                displayBorrowerUid = `room-${borrowerRoom.roomNo}`;
+                displayBorrowerName = `Room ${borrowerRoom.roomNo}`;
+              }
+              const lenderRoom = ROOM_DATA.find(r => 
+                r.roomNo === exp.paid_by_name || 
+                `room-${r.roomNo}` === exp.paid_by_uid || 
+                r.members.some(m => m.toLowerCase() === (exp.paid_by_name || '').toLowerCase())
+              );
+              if (lenderRoom) {
+                displayLenderUid = `room-${lenderRoom.roomNo}`;
+                displayLenderName = `Room ${lenderRoom.roomNo}`;
+              }
+            }
+
+            if (isPending && !isCompleted) {
+              if (isPayer && !isBorrower) {
+                pendingIn.push({ id: exp.id, borrower_uid: displayBorrowerUid, borrower_name: displayBorrowerName, amount: p.amount });
+              } else if (!isPayer && isBorrower) {
+                pendingOut.push({ id: exp.id, lender_uid: displayLenderUid, amount: p.amount });
+              }
+            }
+
+            if (isPayer && !isBorrower) {
+              txList.push({
+                id: `${exp.id}-${displayBorrowerUid}`,
+                description: desc,
+                amount: p.amount,
+                type: 'owed',
+                date: formatDateToDMY(exp.date) || 'Unknown Date',
+                person: displayBorrowerName,
+                notes: exp.notes || '',
+                isSettled: isCompleted
+              });
+              if (!isCompleted) {
+                if (!balancesMap[displayBorrowerUid]) balancesMap[displayBorrowerUid] = { name: displayBorrowerName, netAmount: 0 };
+                balancesMap[displayBorrowerUid].netAmount = safeAdd(balancesMap[displayBorrowerUid].netAmount, p.amount);
+              }
+            } else if (!isPayer && isBorrower) {
+              txList.push({
+                id: `${exp.id}-${user.id}`,
+                description: desc,
+                amount: p.amount,
+                type: 'owe',
+                date: formatDateToDMY(exp.date) || 'Unknown Date',
+                person: displayLenderName,
+                notes: exp.notes || '',
+                isSettled: isCompleted
+              });
+              if (!isCompleted) {
+                if (!balancesMap[displayLenderUid]) balancesMap[displayLenderUid] = { name: displayLenderName, netAmount: 0 };
+                balancesMap[displayLenderUid].netAmount = safeSubtract(balancesMap[displayLenderUid].netAmount, p.amount);
+              }
+            }
+          });
+        });
+
+        let finalOweSum = 0;
+        let finalOwedSum = 0;
+        const finalOweArr = [];
+        const finalOwedArr = [];
+
+        Object.entries(balancesMap).forEach(([uid, b]) => {
+          if (b.netAmount > 0.005) {
+            finalOwedSum = safeAdd(finalOwedSum, b.netAmount);
+            finalOwedArr.push({ uid, name: b.name, amount: b.netAmount, desc: 'Net Outstanding Balance', date: '' });
+          } else if (b.netAmount < -0.005) {
+            const absAmount = Math.abs(b.netAmount);
+            finalOweSum = safeAdd(finalOweSum, absAmount);
+            finalOweArr.push({ uid, name: b.name, amount: absAmount, desc: 'Net Outstanding Balance', date: '' });
+          }
+        });
+
+        return {
+          totalOwe: finalOweSum,
+          totalOwed: finalOwedSum,
+          netBalance: safeSubtract(finalOwedSum, finalOweSum),
+          transactionsList: txList,
+          oweDetails: finalOweArr,
+          owedDetails: finalOwedArr,
+          pendingIncoming: pendingIn,
+          pendingOutgoing: pendingOut
+        };
+    };
+
+    return {
+        individualStats: processExpenses('individual'),
+        roomStats: processExpenses('room')
+    };
+  }, [expenses, user]);
+
+  const auditLogs = useMemo(() => {
+    return expenses.map(exp => {
+      const expectedTotal = safeRound(exp.total_amount || 0);
+      const actualTotal = safeSum((exp.participants || []).map(p => p.amount || 0));
+      const diff = safeSubtract(expectedTotal, actualTotal);
+      return {
+        id: exp.id,
+        description: exp.description || 'Shared Expense',
+        expectedTotal,
+        actualTotal,
+        diff,
+        isValid: Math.abs(diff) < 0.001,
+        date: formatDateToDMY(exp.date) || 'Unknown Date',
+      };
+    });
+  }, [expenses]);
+
+  const globalInvariant = useMemo(() => {
+    const systemBalances = {};
+    expenses.forEach(exp => {
+      const isDocCompleted = exp.status === 'completed';
+      if (isDocCompleted) return;
+      
+      exp.participants?.forEach(p => {
+        if (p.uid === exp.paid_by_uid) return;
+        if (!p.amount || p.amount <= 0) return;
+        if (p.status === 'completed') return;
+        
+        // Payer is owed
+        if (!systemBalances[exp.paid_by_uid]) systemBalances[exp.paid_by_uid] = 0;
+        systemBalances[exp.paid_by_uid] = safeAdd(systemBalances[exp.paid_by_uid], p.amount);
+        
+        // Borrower owes
+        if (!systemBalances[p.uid]) systemBalances[p.uid] = 0;
+        systemBalances[p.uid] = safeSubtract(systemBalances[p.uid], p.amount);
+      });
+    });
+    
+    const allUsersSum = Object.values(systemBalances).reduce((sum, val) => safeAdd(sum, val), 0);
+    const totalTransactionsChecked = expenses.length;
+    const totalDiscrepancies = auditLogs.filter(log => !log.isValid).length;
+    
+    return {
+      allUsersSum,
+      isLedgerBalanced: Math.abs(allUsersSum) < 0.01,
+      totalTransactionsChecked,
+      totalDiscrepancies,
+      systemBalances
+    };
+  }, [expenses, auditLogs]);
+
+  const handleAcceptEndorsement = async (endorsement) => {
+    try {
+      setIsEndorseActionLoading(true);
+      const batch = writeBatch(db);
+
+      const endRef = doc(db, 'endorsements', endorsement.id);
+      batch.update(endRef, { status: 'completed', acceptedAt: new Date().toISOString() });
+
+      const dateNow = new Date().toISOString();
+
+      const exp1Ref = doc(collection(db, 'expenses'));
+      batch.set(exp1Ref, {
+        amount: endorsement.amount,
+        total_amount: endorsement.amount,
+        category: 'transfer',
+        date: dateNow,
+        created_at: dateNow,
+        description: `Hawala Settlement: Cleared ${endorsement.fromDebtorName}'s debt to ${endorsement.oldCreditorName}`,
+        paid_by_uid: endorsement.fromDebtorUid,
+        paid_by_name: endorsement.fromDebtorName,
+        participants: [{
+          uid: endorsement.oldCreditorUid,
+          name: endorsement.oldCreditorName,
+          amount: endorsement.amount,
+          status: 'pending'
+        }],
+        status: 'pending'
+      });
+
+      const exp2Ref = doc(collection(db, 'expenses'));
+      batch.set(exp2Ref, {
+        amount: endorsement.amount,
+        total_amount: endorsement.amount,
+        category: 'transfer',
+        date: dateNow,
+        created_at: dateNow,
+        description: `Hawala Settlement: Cleared ${endorsement.oldCreditorName}'s debt to ${endorsement.newCreditorName}`,
+        paid_by_uid: endorsement.oldCreditorUid,
+        paid_by_name: endorsement.oldCreditorName,
+        participants: [{
+          uid: endorsement.newCreditorUid,
+          name: endorsement.newCreditorName,
+          amount: endorsement.amount,
+          status: 'pending'
+        }],
+        status: 'pending'
+      });
+
+      const exp3Ref = doc(collection(db, 'expenses'));
+      batch.set(exp3Ref, {
+        amount: endorsement.amount,
+        total_amount: endorsement.amount,
+        category: 'transfer',
+        date: dateNow,
+        created_at: dateNow,
+        description: `Debt Endorsement: ${endorsement.oldCreditorName} transferred ${endorsement.fromDebtorName}'s debt to you.`,
+        paid_by_uid: endorsement.newCreditorUid,
+        paid_by_name: endorsement.newCreditorName,
+        participants: [{
+          uid: endorsement.fromDebtorUid,
+          name: endorsement.fromDebtorName,
+          amount: endorsement.amount,
+          status: 'pending'
+        }],
+        status: 'pending'
+      });
+
+      await batch.commit();
+      fetchExpenses();
+    } catch (err) {
+      console.error(err);
+      alert('Failed to accept endorsement.');
+    } finally {
+      setIsEndorseActionLoading(false);
+    }
+  };
+
+  const handleRejectEndorsement = async (endorsementId) => {
+    try {
+      setIsEndorseActionLoading(true);
+      await updateDoc(doc(db, 'endorsements', endorsementId), { status: 'rejected' });
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsEndorseActionLoading(false);
+    }
+  };
+
+  const handleIPaid = async (lenderUid) => {
+    try {
+      const isLenderRoom = lenderUid.toString().startsWith('room-');
+      let lenderRoomNo = '';
+      let lenderRoomMembers = [];
+      if (isLenderRoom) {
+        lenderRoomNo = lenderUid.replace('room-', '');
+        const rData = ROOM_DATA.find(r => r.roomNo === lenderRoomNo);
+        lenderRoomMembers = rData ? rData.members.map(m => m.toLowerCase()) : [];
+      }
+
+      const myRoom = user?.role === 'room' ? ROOM_DATA.find(r => r.roomNo === user.roomNo) : null;
+      const myRoomMemberNames = myRoom ? myRoom.members.map(m => m.toLowerCase()) : [];
+
+      const originalExpenses = expenses.filter(exp => {
+        const isExpLender = isLenderRoom 
+          ? (exp.paid_by_name === `Room ${lenderRoomNo}` || lenderRoomMembers.includes((exp.paid_by_name || '').toLowerCase()))
+          : exp.paid_by_uid === lenderUid;
+
+        return isExpLender &&
+          exp.status !== 'completed' && exp.status !== 'pending_settlement' &&
+          exp.participants?.some(p => {
+            const isMe = p.uid === user.id || (user?.role === 'room' && myRoomMemberNames.includes((p.name || '').toLowerCase()));
+            return isMe && p.amount > 0 && p.status !== 'completed' && p.status !== 'pending_settlement';
+          });
+      });
+      const updatePromises = originalExpenses.map(exp => {
+        const updatedParticipants = exp.participants.map(p => {
+          const isMe = p.uid === user.id || (user?.role === 'room' && myRoomMemberNames.includes((p.name || '').toLowerCase()));
+          return isMe ? { ...p, status: 'pending_settlement' } : p;
+        });
+        return updateDoc(doc(db, 'expenses', exp.id), { participants: updatedParticipants });
+      });
+      await Promise.all(updatePromises);
+    } catch (err) {
+      console.error('Failed to send payment request:', err);
+      throw err;
+    }
+  };
+
+  const handleConfirmPaid = async (borrowerUid) => {
+    try {
+      const isRoom = borrowerUid.toString().startsWith('room-');
+      let roomMembers = [];
+      if (isRoom) {
+        const roomNo = borrowerUid.replace('room-', '');
+        const rData = ROOM_DATA.find(r => r.roomNo === roomNo);
+        roomMembers = rData ? rData.members.map(m => m.toLowerCase()) : [];
+      }
+
+      const originalExpenses = expenses.filter(exp => 
+        exp.paid_by_uid === user.id &&
+        exp.participants?.some(p => {
+          const matches = isRoom 
+            ? roomMembers.includes((p.name || '').toLowerCase())
+            : p.uid === borrowerUid;
+          return matches && p.status === 'pending_settlement';
+        })
+      );
+      const updatePromises = originalExpenses.map(exp => {
+        const updatedParticipants = exp.participants.map(p => {
+          const matches = isRoom 
+            ? roomMembers.includes((p.name || '').toLowerCase())
+            : p.uid === borrowerUid;
+          return matches ? { ...p, status: 'completed' } : p;
+        });
+        return updateDoc(doc(db, 'expenses', exp.id), { participants: updatedParticipants });
+      });
+      await Promise.all(updatePromises);
+    } catch (err) {
+      console.error('Failed to confirm payment:', err);
+      throw err;
+    }
+  };
+
+  const handleMarkAsPaid = async (borrowerUid) => {
+    try {
+      const isRoom = borrowerUid.toString().startsWith('room-');
+      let roomMembers = [];
+      if (isRoom) {
+        const roomNo = borrowerUid.replace('room-', '');
+        const rData = ROOM_DATA.find(r => r.roomNo === roomNo);
+        roomMembers = rData ? rData.members.map(m => m.toLowerCase()) : [];
+      }
+
+      const originalExpenses = expenses.filter(exp => 
+        exp.paid_by_uid === user.id &&
+        exp.status !== 'completed' && exp.status !== 'pending_settlement' &&
+        exp.participants?.some(p => {
+          const matches = isRoom 
+            ? roomMembers.includes((p.name || '').toLowerCase())
+            : p.uid === borrowerUid;
+          return matches && p.amount > 0 && p.status !== 'completed';
+        })
+      );
+      const updatePromises = originalExpenses.map(exp => {
+        const updatedParticipants = exp.participants.map(p => {
+          const matches = isRoom 
+            ? roomMembers.includes((p.name || '').toLowerCase())
+            : p.uid === borrowerUid;
+          return matches ? { ...p, status: 'completed' } : p;
+        });
+        return updateDoc(doc(db, 'expenses', exp.id), { participants: updatedParticipants });
+      });
+      await Promise.all(updatePromises);
+    } catch (err) {
+      console.error('Failed to directly mark as paid:', err);
+      throw err;
+    }
+  };
+
+  const isRoomUser = user?.role === 'room';
+  const rawStudentDetails = studentsData.find(s => s['رقم  ت']?.toString() === user?.student_id?.toString()) || {};
+  const myRoom = isRoomUser ? ROOM_DATA.find(r => r.roomNo === user.roomNo) : null;
+  
+  const displayDetails = {
+    name: isRoomUser ? user.name : (rawStudentDetails['الإسم الشخصي'] || user?.name || 'Unknown'),
+    id: isRoomUser ? user.student_id : (rawStudentDetails['رقم  ت'] || user?.student_id || 'Unknown'),
+    reg: isRoomUser ? 'Room Account' : (rawStudentDetails['رقم التسجيل'] || 'N/A'),
+    passport: isRoomUser ? 'N/A' : (rawStudentDetails['رقم جواز السفر'] || 'N/A'),
+    dob: isRoomUser ? 'N/A' : (rawStudentDetails['تاريخ الازدياد'] || 'N/A'),
+    isRoom: isRoomUser,
+    members: myRoom ? myRoom.members : [],
+    photoURL: user?.photoURL || ''
+  };
+
+  return (
+    <div className="flex h-screen bg-slate-50 overflow-hidden font-sans">
+      <Sidebar />
+      <div className="flex-1 flex flex-col h-screen overflow-hidden">
+        <Navbar />
+        <main className="flex-1 overflow-y-auto p-4 md:p-8">
+          <div className="max-w-5xl mx-auto space-y-10">
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="flex items-center justify-between">
+              <div>
+                <h1 className="text-xl font-extrabold text-slate-900 tracking-tight">Overview</h1>
+                <p className="text-[12px] text-slate-500 mt-0.5 font-medium">Track your shared expenses in one place.</p>
+              </div>
+            </motion.div>
+
+            {(displayDetails.name !== 'Unknown') && (
+              <ProfileCard details={displayDetails} onEdit={() => setIsSettingsOpen(true)} />
+            )}
+
+            <div className="space-y-3">
+              {/* Pending Endorsement Banners */}
+              <AnimatePresence>
+                {pendingEndorsements.map(req => (
+                  <motion.div 
+                    key={req.id}
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="bg-indigo-50 border border-indigo-100 rounded-xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4 relative z-10 ml-2"
+                  >
+                    <div>
+                      <h3 className="text-[11px] font-black uppercase text-indigo-800 tracking-wider flex items-center gap-1.5 mb-1">
+                        <ArrowRightLeft size={14} /> Endorsement Request
+                      </h3>
+                      <p className="text-xs font-medium text-slate-700">
+                        <span className="font-bold text-slate-900">{req.oldCreditorName}</span> wants to transfer <span className="font-bold text-slate-900">{req.fromDebtorName}</span>'s debt of <span className="font-bold text-indigo-700">{req.amount.toFixed(2)} DH</span> to you.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto">
+                      <button 
+                        onClick={() => handleRejectEndorsement(req.id)}
+                        disabled={isEndorseActionLoading}
+                        className="flex-1 sm:flex-none px-4 py-2 bg-white text-slate-600 text-xs font-bold rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors disabled:opacity-50"
+                      >
+                        Reject
+                      </button>
+                      <button 
+                        onClick={() => handleAcceptEndorsement(req)}
+                        disabled={isEndorseActionLoading}
+                        className="flex-1 sm:flex-none px-4 py-2 bg-indigo-600 text-white text-xs font-bold rounded-lg hover:bg-indigo-700 transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50"
+                      >
+                        {isEndorseActionLoading ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} strokeWidth={3} />} Accept
+                      </button>
+                    </div>
+                  </motion.div>
+                ))}
+              </AnimatePresence>
+
+              {/* Action Buttons Container */}
+              <div className="flex flex-wrap items-center gap-3">
+                <button 
+                  onClick={() => setIsSplitModalOpen(true)}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-[12px] font-bold rounded-xl shadow-[0_4px_12px_rgba(37,99,235,0.15)] hover:shadow-[0_6px_18px_rgba(37,99,235,0.2)] hover:-translate-y-0.5 transition-all flex items-center gap-2 mb-[-10px] relative z-10 ml-2"
+                >
+                  Split an Expense
+                  <div className="w-5 h-5 bg-white/20 rounded-full flex items-center justify-center">
+                    <ArrowUpRight size={12} strokeWidth={3} />
+                  </div>
+                </button>
+
+                <button 
+                  onClick={() => setIsEndorseModalOpen(true)}
+                  className="px-4 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-[12px] font-bold rounded-xl transition-all flex items-center gap-2 mb-[-10px] relative z-10"
+                >
+                  <ArrowRightLeft size={14} strokeWidth={2.5} />
+                  Endorse Debt
+                </button>
+              </div>
+            </div>
+
+            {/* INDIVIDUAL DEBTS (Primary) */}
+            <div className="space-y-6">
+                <div className="flex items-center justify-between mb-2 px-2 border-b border-slate-200 pb-2">
+                    <h2 className="text-sm font-black text-slate-800 uppercase tracking-wider flex items-center gap-2"><User size={16}/> Individual Debts</h2>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <DashboardCard 
+                    title="You Owe" 
+                    amount={individualStats.totalOwe} 
+                    type="owe" 
+                    icon={TrendingDown} 
+                    details={individualStats.oweDetails}
+                    pendingRequests={individualStats.pendingOutgoing}
+                    onAction1={handleIPaid}
+                    isSmall={false}
+                    onRefresh={fetchExpenses}
+                  />
+                  <DashboardCard 
+                    title="You are Owed" 
+                    amount={individualStats.totalOwed} 
+                    type="owed" 
+                    icon={TrendingUp} 
+                    details={individualStats.owedDetails}
+                    pendingRequests={individualStats.pendingIncoming}
+                    onAction1={handleConfirmPaid}
+                    onAction2={handleMarkAsPaid}
+                    isSmall={false}
+                    onRefresh={fetchExpenses}
+                  />
+                </div>
+                <TransactionList 
+                    title="Individual Activity"
+                    transactions={individualStats.transactionsList} 
+                    showAll={showAllIndividualTransactions}
+                    setShowAll={setShowAllIndividualTransactions}
+                />
+            </div>
+
+            {/* ROOM DEBTS (Secondary / Compact) */}
+            <div className="space-y-4 pt-4 border-t border-slate-200">
+                <div className="flex items-center justify-between mb-2 px-2">
+                    <h2 className="text-[12px] font-black text-slate-500 uppercase tracking-wider flex items-center gap-1.5"><Home size={14}/> Room-Wise Splits</h2>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <DashboardCard 
+                    title="Room Total Owe" 
+                    amount={roomStats.totalOwe} 
+                    type="owe" 
+                    icon={TrendingDown} 
+                    details={roomStats.oweDetails}
+                    pendingRequests={roomStats.pendingOutgoing}
+                    onAction1={handleIPaid}
+                    isSmall={true}
+                    onRefresh={fetchExpenses}
+                  />
+                  <DashboardCard 
+                    title="Room Total Owed" 
+                    amount={roomStats.totalOwed} 
+                    type="owed" 
+                    icon={TrendingUp} 
+                    details={roomStats.owedDetails}
+                    pendingRequests={roomStats.pendingIncoming}
+                    onAction1={handleConfirmPaid}
+                    onAction2={handleMarkAsPaid}
+                    isSmall={true}
+                    onRefresh={fetchExpenses}
+                  />
+                </div>
+                <TransactionList 
+                    title="Room Activity"
+                    transactions={roomStats.transactionsList} 
+                    showAll={showAllRoomTransactions}
+                    setShowAll={setShowAllRoomTransactions}
+                    isCompact={true}
+                />
+            </div>
+
+          </div>
+        </main>
+      </div>
+
+      <SplitExpenseModal 
+        isOpen={isSplitModalOpen}
+        onClose={() => setIsSplitModalOpen(false)}
+        onExpenseAdded={fetchExpenses}
+      />
+      <EndorseDebtModal 
+        isOpen={isEndorseModalOpen}
+        onClose={() => setIsEndorseModalOpen(false)}
+        oweDetails={individualStats.oweDetails}
+        owedDetails={individualStats.owedDetails}
+      />
+      <SettingsModal 
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+      />
+
+      {/* Developer Math Audit Toggle Button */}
+      <div className="fixed bottom-6 right-6 z-40">
+        <button
+          onClick={() => setIsDebugOpen(true)}
+          className="flex items-center gap-2 px-4 py-2.5 bg-slate-900 text-white rounded-xl shadow-xl hover:bg-slate-800 hover:shadow-2xl hover:scale-105 active:scale-95 transition-all text-[11px] font-black border border-slate-700/50 cursor-pointer"
+        >
+          <span className="relative flex h-2 w-2">
+            <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${globalInvariant.isLedgerBalanced ? 'bg-emerald-400' : 'bg-rose-400'}`}></span>
+            <span className={`relative inline-flex rounded-full h-2 w-2 ${globalInvariant.isLedgerBalanced ? 'bg-emerald-500' : 'bg-rose-500'}`}></span>
+          </span>
+          🔍 Math Audit Panel
+        </button>
+      </div>
+
+      {/* Developer Math Audit Panel Drawer */}
+      <AnimatePresence>
+        {isDebugOpen && (
+          <>
+            {/* Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsDebugOpen(false)}
+              className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50"
+            />
+            {/* Drawer */}
+            <motion.div
+              initial={{ y: "100%" }}
+              animate={{ y: 0 }}
+              exit={{ y: "100%" }}
+              transition={{ type: "spring", damping: 25, stiffness: 200 }}
+              className="fixed bottom-0 inset-x-0 bg-slate-900 text-slate-100 rounded-t-[2.5rem] shadow-2xl z-50 max-h-[85vh] overflow-hidden flex flex-col border-t border-slate-800/80 font-sans"
+            >
+              {/* Header */}
+              <div className="px-6 py-5 border-b border-slate-800 flex items-center justify-between bg-slate-950/40">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400">
+                    <TrendingUp size={20} strokeWidth={2.5} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-black uppercase tracking-wider text-slate-100 flex items-center gap-2">
+                      Ledger Math Audit Panel
+                      <span className="px-2 py-0.5 text-[9px] font-black rounded bg-blue-900/40 text-blue-400 border border-blue-800/50">DEV CONSOLE</span>
+                    </h3>
+                    <p className="text-[10px] text-slate-400 mt-0.5">Real-time enterprise arithmetic & double-entry integrity tracking</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setIsDebugOpen(false)}
+                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-[10px] text-slate-300 font-bold rounded-xl transition-all cursor-pointer border border-slate-700/50"
+                >
+                  Close Console
+                </button>
+              </div>
+
+              {/* Scrollable Audit Workspace */}
+              <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar bg-slate-950/20">
+                {/* Stats Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {/* Status Card */}
+                  <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-4 flex flex-col justify-between">
+                    <div>
+                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Ecosystem Invariant</p>
+                      <h4 className={`text-xl font-black mt-2 flex items-center gap-2 ${globalInvariant.isLedgerBalanced ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        {globalInvariant.isLedgerBalanced ? '✅ PERFECT' : '⚠️ MISMATCHED'}
+                      </h4>
+                    </div>
+                    <p className="text-[10px] text-slate-400 mt-4 leading-relaxed">
+                      Sum of all student balances is <span className="font-extrabold text-slate-200">{globalInvariant.allUsersSum.toFixed(4)} DH</span>. 
+                      In double-entry split models, this sum must equal 0.00 exactly.
+                    </p>
+                  </div>
+
+                  {/* Transaction Audited Card */}
+                  <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-4 flex flex-col justify-between">
+                    <div>
+                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Audited Documents</p>
+                      <h4 className="text-xl font-black text-blue-400 mt-2">
+                        {globalInvariant.totalTransactionsChecked} <span className="text-[10px] font-bold text-slate-400">expenses</span>
+                      </h4>
+                    </div>
+                    <p className="text-[10px] text-slate-400 mt-4 leading-relaxed">
+                      Every Firestore expense document was recalculated and compared against individual user participant weights.
+                    </p>
+                  </div>
+
+                  {/* Integrity Exceptions Card */}
+                  <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-4 flex flex-col justify-between">
+                    <div>
+                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Validation Discrepancies</p>
+                      <h4 className={`text-xl font-black mt-2 ${globalInvariant.totalDiscrepancies === 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        {globalInvariant.totalDiscrepancies} <span className="text-[10px] font-bold text-slate-400">exceptions</span>
+                      </h4>
+                    </div>
+                    <p className="text-[10px] text-slate-400 mt-4 leading-relaxed">
+                      Number of historical expenses that contain floating-point penny discrepancies (e.g. legacy rounded values).
+                    </p>
+                  </div>
+                </div>
+
+                {/* Ledger Balances Listing */}
+                <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-4 space-y-3">
+                  <h4 className="text-[10px] font-black uppercase text-slate-300 tracking-wider">Active System Ledger Balance Map</h4>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                    {Object.entries(globalInvariant.systemBalances).map(([uid, balance]) => {
+                      const profile = studentsData.find(s => s['رقم  ت']?.toString() === uid?.toString()) || 
+                                      ROOM_DATA.find(r => `room-${r.roomNo}` === uid);
+                      const displayName = profile ? (profile.name || profile['الإسم الشخصي'] || `Room ${profile.roomNo}`) : `ID: ${uid}`;
+                      
+                      return (
+                        <div key={uid} className="bg-slate-950/40 border border-slate-800/50 p-2.5 rounded-xl flex flex-col justify-between">
+                          <p className="text-[10px] font-bold text-slate-300 truncate">{displayName}</p>
+                          <p className={`text-[12px] font-black mt-1 ${balance > 0.005 ? 'text-emerald-400' : balance < -0.005 ? 'text-rose-400' : 'text-slate-400'}`}>
+                            {balance > 0 ? '+' : ''}{balance.toFixed(2)} DH
+                          </p>
+                        </div>
+                      );
+                    })}
+                    {Object.keys(globalInvariant.systemBalances).length === 0 && (
+                      <p className="text-[10px] text-slate-500 py-2 col-span-full text-center">No active unsettled transactions to balance.</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Arithmetic Audit Logs Table */}
+                <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl overflow-hidden">
+                  <div className="px-4 py-3 bg-slate-900 border-b border-slate-800 flex items-center justify-between">
+                    <h4 className="text-[10px] font-black uppercase text-slate-300 tracking-wider">Historical Arithmetic Audit Trail</h4>
+                    <span className="text-[9px] font-bold text-slate-500">Live checks on save</span>
+                  </div>
+                  <div className="divide-y divide-slate-800/50 overflow-x-auto max-h-[300px] custom-scrollbar">
+                    {auditLogs.map((log) => (
+                      <div key={log.id} className="px-4 py-3 flex items-center justify-between text-[11px] hover:bg-slate-800/30 transition-colors gap-4 min-w-[500px]">
+                        <div className="w-[30%] shrink-0">
+                          <p className="font-extrabold text-slate-200 truncate">{log.description}</p>
+                          <p className="text-[9px] text-slate-500 font-medium mt-0.5">{log.date}</p>
+                        </div>
+                        <div className="flex-1 flex items-center justify-end gap-6 text-right">
+                          <div>
+                            <p className="text-[9px] font-bold text-slate-500">Expected Total</p>
+                            <p className="font-black text-slate-300">{log.expectedTotal.toFixed(2)} DH</p>
+                          </div>
+                          <div>
+                            <p className="text-[9px] font-bold text-slate-500">Sum of Splits</p>
+                            <p className="font-black text-slate-300">{log.actualTotal.toFixed(2)} DH</p>
+                          </div>
+                          <div>
+                            <p className="text-[9px] font-bold text-slate-500">Discrepancy</p>
+                            <p className={`font-black ${Math.abs(log.diff) > 0.001 ? 'text-rose-400' : 'text-slate-500'}`}>
+                              {log.diff > 0 ? '+' : ''}{log.diff.toFixed(2)} DH
+                            </p>
+                          </div>
+                          <span className={`px-2 py-0.5 text-[8px] font-black rounded-full uppercase tracking-wider shrink-0 ${
+                            log.isValid ? 'bg-emerald-950 text-emerald-400 border border-emerald-800/35' : 'bg-rose-950 text-rose-400 border border-rose-800/35'
+                          }`}>
+                            {log.isValid ? 'VERIFIED' : 'MISMATCH'}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function DashboardCard({ title, amount, type, icon: Icon, details, pendingRequests, onAction1, onAction2, isSmall, onRefresh }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [processingState, setProcessingState] = useState({}); // { [uid]: 'idle' | 'processing' | 'done' }
+  
+  const colorClass = type === 'owe' ? 'text-red-500' : 'text-emerald-500';
+  const bgClass = type === 'owe' ? 'bg-red-50/50' : 'bg-emerald-50/50';
+  const borderClass = type === 'owe' ? 'border-red-100/50' : 'border-emerald-100/50';
+
+  const runAnimatedAction = async (uid, actionFn) => {
+    if (!actionFn) return;
+    setProcessingState(prev => ({ ...prev, [uid]: 'processing' }));
+    try {
+      await actionFn(uid);
+      setProcessingState(prev => ({ ...prev, [uid]: 'done' }));
+      // Wait for the done animation to display fully (800ms) before refresh removes the element
+      await new Promise(resolve => setTimeout(resolve, 800));
+      if (onRefresh) onRefresh();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setProcessingState(prev => {
+        const next = { ...prev };
+        delete next[uid];
+        return next;
+      });
+    }
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      className={`bg-white rounded-2xl shadow-[0_4px_20px_rgb(0,0,0,0.01)] border ${borderClass} overflow-hidden relative group`}
+    >
+      <div 
+        onClick={() => setIsExpanded(!isExpanded)}
+        className="p-4 sm:p-5 flex items-center justify-between cursor-pointer hover:bg-slate-50/50 transition-all select-none"
+      >
+        <div className="flex items-center gap-3">
+          <div className={`${bgClass} p-2 rounded-xl`}>
+            <Icon size={16} className={colorClass} strokeWidth={2.5} />
+          </div>
+          <div>
+            <p className="text-[10px] sm:text-[11px] font-bold text-slate-400 uppercase tracking-widest leading-none">{title}</p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2.5">
+          <div className="flex items-baseline gap-0.5">
+            <h2 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">{amount.toFixed(2)}</h2>
+            <span className="text-[10px] font-bold text-slate-400">DH</span>
+          </div>
+          <ChevronDown size={14} className={`text-slate-400 transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`} />
+        </div>
+      </div>
+
+      <AnimatePresence>
+        {isExpanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="overflow-hidden bg-slate-50/50 border-t border-slate-100"
+          >
+            <div className="p-4 space-y-3">
+              {details.length === 0 ? (
+                <p className="text-xs text-slate-400 text-center font-medium py-2">No active balances</p>
+              ) : details.map((item, idx) => {
+                let actionUI = null;
+                const state = processingState[item.uid] || 'idle';
+
+                if (title.includes("You Owe") || title === "Room Total Owe") {
+                  const pendingOut = pendingRequests.find(p => p.lender_uid === item.uid);
+                  if (pendingOut) {
+                    actionUI = (
+                      <div className="mt-2 flex items-center gap-2 p-2 bg-slate-100 rounded-lg border border-slate-200">
+                        <Clock size={12} className="text-slate-400" />
+                        <span className="text-[10px] text-slate-500 font-semibold">Waiting for {item.name} to confirm</span>
+                      </div>
+                    );
+                  } else {
+                    actionUI = (
+                      <motion.button 
+                        disabled={state === 'processing' || state === 'done'}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          runAnimatedAction(item.uid, () => onAction1 && onAction1(item.uid, item.name, item.amount));
+                        }}
+                        className={`mt-2 w-full py-1.5 text-[10px] font-bold rounded-lg border flex items-center justify-center gap-1.5 transition-all shadow-sm ${
+                          state === 'processing' 
+                            ? 'bg-slate-50 text-slate-400 border-slate-100 cursor-not-allowed'
+                            : state === 'done'
+                            ? 'bg-emerald-500 text-white border-emerald-500'
+                            : 'bg-white text-blue-600 hover:bg-blue-50 border-blue-100'
+                        }`}
+                        whileTap={{ scale: state === 'idle' ? 0.97 : 1 }}
+                      >
+                        {state === 'processing' ? (
+                          <>
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            Sending...
+                          </>
+                        ) : state === 'done' ? (
+                          <motion.span 
+                            initial={{ scale: 0 }}
+                            animate={{ scale: 1 }}
+                            transition={{ type: 'spring', stiffness: 200, damping: 10 }}
+                            className="flex items-center gap-1"
+                          >
+                            Sent! 📨
+                          </motion.span>
+                        ) : (
+                          'I Paid'
+                        )}
+                      </motion.button>
+                    );
+                  }
+                } else if (title.includes("You are Owed") || title === "Room Total Owed") {
+                  const pendingIn = pendingRequests.find(p => p.borrower_uid === item.uid);
+                  if (pendingIn) {
+                    actionUI = (
+                      <div className="mt-2 p-2 bg-orange-50 rounded-lg border border-orange-100" onClick={(e) => e.stopPropagation()}>
+                        <p className="text-[9px] text-orange-600 font-semibold mb-1.5 leading-tight">
+                          {item.name} marked this as paid. Confirm?
+                        </p>
+                        <motion.button 
+                          disabled={state === 'processing' || state === 'done'}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            runAnimatedAction(item.uid, () => onAction1 && onAction1(item.uid));
+                          }}
+                          className={`w-full py-1 text-[10px] font-bold rounded-md flex items-center justify-center gap-1.5 transition-all shadow-sm ${
+                            state === 'processing'
+                              ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                              : state === 'done'
+                              ? 'bg-emerald-500 text-white'
+                              : 'bg-orange-500 text-white hover:bg-orange-600'
+                          }`}
+                          whileTap={{ scale: state === 'idle' ? 0.97 : 1 }}
+                        >
+                          {state === 'processing' ? (
+                            <>
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                              Confirming...
+                            </>
+                          ) : state === 'done' ? (
+                            <motion.span 
+                              initial={{ scale: 0 }}
+                              animate={{ scale: 1 }}
+                              transition={{ type: 'spring', stiffness: 200, damping: 10 }}
+                            >
+                              Confirmed! ✅
+                            </motion.span>
+                          ) : (
+                            'Confirm Paid'
+                          )}
+                        </motion.button>
+                      </div>
+                    );
+                  } else {
+                    actionUI = (
+                      <motion.button 
+                        disabled={state === 'processing' || state === 'done'}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          runAnimatedAction(item.uid, () => onAction2 && onAction2(item.uid, item.name, item.amount));
+                        }}
+                        className={`mt-2 w-full py-1.5 text-[10px] font-bold rounded-lg border flex items-center justify-center gap-1.5 transition-all shadow-sm ${
+                          state === 'processing'
+                            ? 'bg-slate-50 text-slate-400 border-slate-100 cursor-not-allowed'
+                            : state === 'done'
+                            ? 'bg-emerald-500 text-white border-emerald-500'
+                            : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100 border-emerald-100'
+                        }`}
+                        whileTap={{ scale: state === 'idle' ? 0.97 : 1 }}
+                      >
+                        {state === 'processing' ? (
+                          <>
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            Saving...
+                          </>
+                        ) : state === 'done' ? (
+                          <motion.span 
+                            initial={{ scale: 0 }}
+                            animate={{ scale: 1 }}
+                            transition={{ type: 'spring', stiffness: 200, damping: 10 }}
+                            className="flex items-center gap-1"
+                          >
+                            Paid! 🎉
+                          </motion.span>
+                        ) : (
+                          <>
+                            Mark as Paid <Check size={10} strokeWidth={3} />
+                          </>
+                        )}
+                      </motion.button>
+                    );
+                  }
+                }
+
+                return (
+                  <div key={idx} className="flex flex-col border-b border-slate-200/50 last:border-0 pb-3 last:pb-0" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-[11px] text-slate-600"><span className="font-extrabold text-slate-900">{item.name}</span></p>
+                        <p className="text-[9px] text-slate-400 font-medium mt-0.5">{item.desc}</p>
+                      </div>
+                      <p className="text-xs font-extrabold text-slate-900">{item.amount.toFixed(2)} <span className="text-[9px] text-slate-500 font-bold">DH</span></p>
+                    </div>
+                    {actionUI}
+                  </div>
+                );
+              })}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
+  );
+}
+
+function TransactionList({ title, transactions, showAll, setShowAll, isCompact }) {
+    const displayedTransactions = showAll ? transactions : transactions.slice(0, 3);
+    
+    return (
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className={`bg-white ${isCompact ? 'rounded-2xl p-4' : 'rounded-[2rem] p-6'} shadow-[0_8px_30px_rgb(0,0,0,0.02)] border border-slate-100`}>
+            <div className="flex items-center justify-between mb-6">
+                <h3 className={`${isCompact ? 'text-[12px]' : 'text-sm'} font-black text-slate-800 uppercase tracking-widest`}>{title}</h3>
+                <span className="px-3 py-1 bg-slate-50 text-slate-500 text-[10px] font-bold rounded-full">{transactions.length} Total</span>
+            </div>
+            
+            <div className="space-y-4">
+                {displayedTransactions.length === 0 ? (
+                    <div className="text-center py-6 text-slate-400">
+                        <FileText size={isCompact ? 24 : 32} className="mx-auto mb-2 opacity-50" />
+                        <p className="text-[11px] font-semibold">No recent activity</p>
+                    </div>
+                ) : displayedTransactions.map((tx, idx) => (
+                    <div key={idx} className={`flex items-center justify-between p-3 rounded-xl border ${tx.isSettled ? 'bg-slate-50/50 border-slate-100' : 'bg-white border-slate-100 shadow-sm'} hover:shadow-md transition-all group`}>
+                        <div className="flex items-center gap-3 w-full max-w-[60%]">
+                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${tx.isSettled ? 'bg-slate-100 text-slate-400' : (tx.type === 'owe' ? 'bg-red-50 text-red-500' : 'bg-emerald-50 text-emerald-500')}`}>
+                                {tx.isSettled ? <Check size={14} strokeWidth={3} /> : (tx.type === 'owe' ? <TrendingDown size={14} /> : <TrendingUp size={14} />)}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                                <p className="text-[11px] font-bold text-slate-800 truncate">{tx.description}</p>
+                                <div className="flex items-center gap-2 mt-0.5">
+                                    <span className="text-[9px] font-semibold text-slate-400 truncate">{tx.person}</span>
+                                    <span className="w-1 h-1 rounded-full bg-slate-200"></span>
+                                    <span className="text-[9px] font-semibold text-slate-400 shrink-0">{tx.date}</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="text-right pl-3 shrink-0">
+                            <p className={`text-[12px] font-black ${tx.isSettled ? 'text-slate-400' : (tx.type === 'owe' ? 'text-red-500' : 'text-emerald-500')}`}>
+                                {tx.type === 'owe' ? '-' : '+'}{tx.amount.toFixed(2)} <span className="text-[9px]">DH</span>
+                            </p>
+                            {tx.isSettled && <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">Repaid</p>}
+                        </div>
+                    </div>
+                ))}
+            </div>
+
+            {transactions.length > 3 && (
+                <button 
+                    onClick={() => setShowAll(!showAll)}
+                    className="w-full mt-4 py-2.5 bg-slate-50 hover:bg-slate-100 text-slate-500 text-[10px] font-bold rounded-xl transition-colors uppercase tracking-widest"
+                >
+                    {showAll ? 'Show Less' : 'View All History'}
+                </button>
+            )}
+        </motion.div>
+    );
+}
+
+function ProfileCard({ details, onEdit }) {
+  const fileInputRef = useRef(null);
+  const [uploading, setUploading] = useState(false);
+  const user = useAuthStore((state) => state.user);
+
+  const handlePhotoChange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    setUploading(true);
+
+    try {
+      // 1. Client-side Image Compression (max 30KB, 250px width/height for database storage)
+      const options = {
+        maxSizeMB: 0.03,
+        maxWidthOrHeight: 250,
+        useWebWorker: true
+      };
+      
+      const compressedFile = await imageCompression(file, options);
+      
+      // 2. Read as Base64 string
+      const reader = new FileReader();
+      reader.readAsDataURL(compressedFile);
+      reader.onloadend = async () => {
+        try {
+          const base64data = reader.result;
+
+          // 3. Save Base64 string directly to Firestore profile document
+          const docRef = doc(db, 'profiles', user.id);
+          await setDoc(docRef, { photoURL: base64data }, { merge: true });
+
+          // 4. Synchronize states
+          const { setUser } = useAuthStore.getState();
+          setUser({ ...user, photoURL: base64data });
+        } catch (dbErr) {
+          console.error(dbErr);
+          alert('Failed to save photo to database.');
+        } finally {
+          setUploading(false);
+        }
+      };
+    } catch (err) {
+      console.error(err);
+      alert('Failed to compress profile photo.');
+      setUploading(false);
+    }
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.1 }}
+      className="bg-white rounded-3xl shadow-[0_8_30_rgb(0,0,0,0.02)] border border-slate-100 overflow-hidden max-w-sm mx-auto mb-8 relative group hover:shadow-[0_8px_30px_rgb(0,0,0,0.05)] transition-all duration-300"
+    >
+      <div className="h-24 bg-gradient-to-r from-[#0088cc] to-[#00aaff] w-full relative overflow-hidden">
+        <div className="absolute top-0 right-0 w-24 h-24 bg-white/10 rounded-full blur-2xl -translate-y-1/2 translate-x-1/4"></div>
+        <button 
+          onClick={onEdit}
+          className="absolute top-4 right-4 p-2 bg-white/20 hover:bg-white/30 backdrop-blur-md rounded-lg text-white transition-all group/edit outline-none cursor-pointer"
+        >
+          <Edit3 size={14} strokeWidth={2.5} className="group-hover/edit:scale-110 transition-transform" />
+        </button>
+      </div>
+      
+      <div className="flex justify-center -mt-12 relative z-10">
+        <div className="w-24 h-24 bg-white rounded-full p-1 shadow-sm relative group/avatar cursor-pointer hover:scale-105 transition-transform duration-500 ease-out">
+           <div className="w-full h-full bg-slate-50 rounded-full flex items-center justify-center border border-slate-100 overflow-hidden relative">
+             {details.photoURL ? (
+               <img src={details.photoURL} alt="Profile" className="w-full h-full object-cover animate-fade-in" />
+             ) : (
+               <div className="w-full h-full flex items-center justify-center bg-gradient-to-tr from-blue-500 to-indigo-600 text-white font-black text-3xl uppercase">
+                 {details.name ? details.name.charAt(0) : <User size={36} />}
+               </div>
+             )}
+
+             {/* Hover Upload Overlay */}
+             <div 
+               onClick={() => fileInputRef.current?.click()}
+               className="absolute inset-0 bg-black/45 opacity-0 group-hover/avatar:opacity-100 transition-opacity flex flex-col items-center justify-center text-white text-[9px] font-black gap-0.5 px-1.5 text-center leading-tight cursor-pointer"
+             >
+               <Camera size={15} strokeWidth={2.5} />
+               <span>{details.photoURL ? 'Change Photo' : 'Upload Photo'}</span>
+             </div>
+
+             {/* Loader Overlay */}
+             {uploading && (
+               <div className="absolute inset-0 bg-black/60 flex items-center justify-center text-white">
+                 <Loader2 size={24} className="animate-spin text-blue-400" />
+               </div>
+             )}
+           </div>
+        </div>
+
+        <input 
+          type="file"
+          ref={fileInputRef}
+          onChange={handlePhotoChange}
+          accept="image/*"
+          className="hidden"
+          disabled={uploading}
+        />
+      </div>
+
+      <div className="text-center mt-3 px-6 pb-2">
+        <h2 className="text-lg tracking-tight font-extrabold text-slate-900">{details.name}</h2>
+        <p className="text-[#0088cc] font-semibold mt-1 text-[10px] bg-blue-50/50 inline-block px-3 py-0.5 rounded-full border border-blue-100/50 uppercase tracking-widest">ID: {details.id}</p>
+      </div>
+
+      <div className="p-5 pt-4">
+        <div className="bg-slate-50/80 rounded-xl p-4 space-y-3 border border-slate-100/50 relative overflow-hidden group-hover:bg-slate-50 transition-colors duration-300">
+          <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-[#0088cc] to-[#00aaff] opacity-20"></div>
+          
+          <div className="relative z-10">
+            <p className="text-[9px] font-bold text-slate-400 tracking-widest uppercase mb-0.5">Registration</p>
+            <p className="text-[13px] font-semibold text-slate-800">{details.reg}</p>
+          </div>
+          
+          {details.isRoom && details.members && details.members.length > 0 && (
+            <div className="relative z-10 pt-3 mt-3 border-t border-slate-200/50 space-y-2">
+              <p className="text-[9px] font-bold text-slate-400 tracking-widest uppercase flex items-center gap-1.5">
+                <Users size={11} className="text-slate-400" /> Room Members
+              </p>
+              <div className="space-y-1.5">
+                {details.members.map((member, i) => (
+                  <div key={i} className="flex items-center gap-2.5 p-2 rounded-xl bg-white border border-slate-100 hover:border-slate-200/80 hover:shadow-[0_2px_8px_rgba(0,0,0,0.02)] transition-all duration-200">
+                    <div className="w-6 h-6 rounded-lg bg-blue-50/80 border border-blue-100 flex items-center justify-center shrink-0">
+                      <span className="text-[#0088cc] text-[10px] font-extrabold">{member.charAt(0)}</span>
+                    </div>
+                    <span className="text-[11px] font-bold text-slate-700 truncate">{member}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {!details.isRoom && (
+            <>
+              <div className="relative z-10">
+                <p className="text-[9px] font-bold text-slate-400 tracking-widest uppercase mb-0.5">Passport</p>
+                <p className="text-[13px] font-semibold text-slate-800">{details.passport}</p>
+              </div>
+              <div className="relative z-10">
+                <p className="text-[9px] font-bold text-slate-400 tracking-widest uppercase mb-0.5">Date of Birth</p>
+                <p className="text-[13px] font-semibold text-slate-800">{details.dob}</p>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </motion.div>
+  );
+}
