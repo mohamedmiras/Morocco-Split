@@ -174,14 +174,14 @@ export default function SplitExpenseModal({ isOpen, onClose, onExpenseAdded, pre
           const profilesData = querySnapshot.docs.map(doc => ({id: doc.id, ...doc.data()}));
           setAllProfiles(profilesData);
 
-          if (!preselectedGroupId && user) {
-            const gQ = query(collection(db, 'groups'), where('memberUids', 'array-contains', user.student_id?.toString()));
+          if (!preselectedGroupId && user && user.student_id) {
+            const gQ = query(collection(db, 'groups'), where('memberUids', 'array-contains', user.student_id.toString()));
             const gSnap = await getDocs(gQ);
             setUserGroups(gSnap.docs.map(doc => ({id: doc.id, ...doc.data()})));
           }
         } catch (err) {
-          console.error(err);
-          setError('Failed to load members or groups.');
+          console.error("Firestore Loading Error:", err);
+          setError('Failed to load members or groups: ' + err.message);
         } finally {
           setFetchingProfiles(false);
         }
@@ -215,10 +215,10 @@ export default function SplitExpenseModal({ isOpen, onClose, onExpenseAdded, pre
           const targetGroup = preselectedGroupId ? { members: groupMembers } : userGroups.find(g => g.id === activeGroupId);
           if (targetGroup && targetGroup.members) {
             const initialParticipants = targetGroup.members.map(member => {
-              const profile = allProfiles.find(p => p.id === member.uid);
+              const profile = allProfiles.find(p => p.id === member.uid || p.student_id?.toString() === member.uid?.toString());
               return {
                 id: member.uid,
-                student_id: profile ? parseInt(profile.student_id) : parseInt(member.uid),
+                student_id: profile ? (parseInt(profile.student_id) || 999) : (parseInt(member.uid) || 999),
                 name: member.name,
                 amount: 0,
                 selected: true,
