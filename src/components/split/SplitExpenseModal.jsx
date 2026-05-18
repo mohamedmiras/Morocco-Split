@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Calendar as CalendarIcon, FileText, AlignLeft, SplitSquareHorizontal, HandCoins, AlertCircle, Loader2, Users, Home, Check, CheckSquare } from 'lucide-react';
 import { db } from '../../lib/firebase';
-import { collection, query, orderBy, getDocs, addDoc } from 'firebase/firestore';
+import { collection, query, orderBy, getDocs, addDoc, where } from 'firebase/firestore';
 import { useAuthStore } from '../../store/authStore';
 import MemberSplitCard from './MemberSplitCard';
 import { calculateSplit } from './SplitCalculator';
