@@ -5,6 +5,7 @@ import { useAuthStore } from '../../store/authStore';
 import { db } from '../../lib/firebase';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import studentsData from '../../data/students.json';
+import { ROOM_DATA } from '../../data/rooms';
 
 const ARABIC_TO_ENGLISH_NAMES = {
   "عبد الحسيب": "Abdul Haseeb",
@@ -79,7 +80,23 @@ export default function CreateGroupModal({ isOpen, onClose }) {
   const GIRL_IDS = [6, 9, 16, 17, 29];
   const ALLOWED_BOY_IDS = [4, 18, 34];
 
-  const filteredStudents = studentsData.filter(s => {
+  const displayItems = user?.role === 'room' 
+    ? ROOM_DATA.map(r => ({
+        'رقم  ت': `room${r.roomNo}`,
+        'الإسم الشخصي': `Room ${r.roomNo}`
+      }))
+    : studentsData;
+
+  const filteredStudents = displayItems.filter(s => {
+    const englishName = user?.role === 'room' ? s['الإسم الشخصي'] : formatName(s['الإسم الشخصي'] || '');
+    if (search) {
+      if (!englishName.toLowerCase().includes(search.toLowerCase())) return false;
+    }
+
+    if (user?.role === 'room') {
+      return true;
+    }
+
     const studentId = parseInt(s['رقم  ت']);
     
     // Apply gender filtering rules:
@@ -92,11 +109,7 @@ export default function CreateGroupModal({ isOpen, onClose }) {
       if (GIRL_IDS.includes(studentId)) return false;
     }
 
-    const englishName = formatName(s['الإسم الشخصي'] || '');
-    if (!search) return true;
-    const n = englishName.toLowerCase();
-    const q = search.toLowerCase();
-    return n.includes(q);
+    return true;
   });
 
   const toggleMember = (student) => {
