@@ -7,6 +7,7 @@ import Sidebar from '../components/Sidebar';
 import SettingsModal from '../components/SettingsModal';
 import SplitExpenseModal from '../components/split/SplitExpenseModal';
 import EndorseDebtModal from '../components/endorsement/EndorseDebtModal';
+import ImageCropperModal from '../components/ImageCropperModal';
 import { useAuthStore } from '../store/authStore';
 import studentsData from '../data/students.json';
 import { db } from '../lib/firebase';
@@ -970,23 +971,36 @@ function TransactionList({ title, transactions, showAll, setShowAll, isCompact }
 function ProfileCard({ details, onEdit }) {
   const fileInputRef = useRef(null);
   const [uploading, setUploading] = useState(false);
+  const [cropperImageSrc, setCropperImageSrc] = useState(null);
+  const [isCropping, setIsCropping] = useState(false);
   const user = useAuthStore((state) => state.user);
 
-  const handlePhotoChange = async (e) => {
+  const handlePhotoChange = (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
+    const reader = new FileReader();
+    reader.addEventListener('load', () => {
+      setCropperImageSrc(reader.result);
+      setIsCropping(true);
+    });
+    reader.readAsDataURL(file);
+    e.target.value = ''; // Reset input so same file can be selected again
+  };
+
+  const handleCropComplete = async (croppedBlob) => {
+    setIsCropping(false);
     setUploading(true);
 
     try {
-      // 1. Client-side Image Compression (max 30KB, 250px width/height for database storage)
+      // 1. Client-side Image Compression
       const options = {
         maxSizeMB: 0.03,
         maxWidthOrHeight: 250,
         useWebWorker: true
       };
       
-      const compressedFile = await imageCompression(file, options);
+      const compressedFile = await imageCompression(croppedBlob, options);
       
       // 2. Read as Base64 string
       const reader = new FileReader();
@@ -1007,12 +1021,14 @@ function ProfileCard({ details, onEdit }) {
           alert('Failed to save photo to database.');
         } finally {
           setUploading(false);
+          setCropperImageSrc(null);
         }
       };
     } catch (err) {
       console.error(err);
       alert('Failed to compress profile photo.');
       setUploading(false);
+      setCropperImageSrc(null);
     }
   };
 
@@ -1118,6 +1134,18 @@ function ProfileCard({ details, onEdit }) {
           )}
         </div>
       </div>
+
+      {/* Profile Image Cropper Modal */}
+      <ImageCropperModal
+        isOpen={isCropping}
+        imageSrc={cropperImageSrc}
+        onClose={() => {
+          setIsCropping(false);
+          setCropperImageSrc(null);
+        }}
+        onCropComplete={handleCropComplete}
+        isSaving={uploading}
+      />
     </motion.div>
   );
 }

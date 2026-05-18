@@ -6,6 +6,7 @@ import { updatePassword } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
 import { useAuthStore } from '../store/authStore';
 import imageCompression from 'browser-image-compression';
+import ImageCropperModal from './ImageCropperModal';
 
 export default function SettingsModal({ isOpen, onClose }) {
   const user = useAuthStore((state) => state.user);
@@ -13,6 +14,8 @@ export default function SettingsModal({ isOpen, onClose }) {
   const fileInputRef = useRef(null);
   const [photoURL, setPhotoURL] = useState(user?.photoURL || '');
   const [uploading, setUploading] = useState(false);
+  const [cropperImageSrc, setCropperImageSrc] = useState(null);
+  const [isCropping, setIsCropping] = useState(false);
   
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -21,23 +24,35 @@ export default function SettingsModal({ isOpen, onClose }) {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
-  const handlePhotoChange = async (e) => {
+  const handlePhotoChange = (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
-    setUploading(true);
     setError('');
     setSuccess('');
 
+    const reader = new FileReader();
+    reader.addEventListener('load', () => {
+      setCropperImageSrc(reader.result);
+      setIsCropping(true);
+    });
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const handleCropComplete = async (croppedBlob) => {
+    setIsCropping(false);
+    setUploading(true);
+
     try {
-      // 1. Client-side Image Compression (max 30KB, 250px width/height for database storage)
+      // 1. Client-side Image Compression
       const options = {
         maxSizeMB: 0.03,
         maxWidthOrHeight: 250,
         useWebWorker: true
       };
       
-      const compressedFile = await imageCompression(file, options);
+      const compressedFile = await imageCompression(croppedBlob, options);
       
       // 2. Read as Base64 string
       const reader = new FileReader();
@@ -61,12 +76,14 @@ export default function SettingsModal({ isOpen, onClose }) {
           setError('Failed to save photo to database.');
         } finally {
           setUploading(false);
+          setCropperImageSrc(null);
         }
       };
     } catch (err) {
       console.error(err);
       setError('Failed to compress profile photo.');
       setUploading(false);
+      setCropperImageSrc(null);
     }
   };
 
@@ -319,6 +336,18 @@ export default function SettingsModal({ isOpen, onClose }) {
           </motion.div>
         </div>
       )}
+
+      {/* Profile Image Cropper Modal */}
+      <ImageCropperModal
+        isOpen={isCropping}
+        imageSrc={cropperImageSrc}
+        onClose={() => {
+          setIsCropping(false);
+          setCropperImageSrc(null);
+        }}
+        onCropComplete={handleCropComplete}
+        isSaving={uploading}
+      />
     </AnimatePresence>
   );
 }

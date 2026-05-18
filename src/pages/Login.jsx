@@ -259,10 +259,8 @@ export default function Login() {
               }
             </span>
           </div>
- 
- </div>
- </div>
- </motion.div>
+        </div>
+      </motion.div>
 
       {/* Add to Home Screen Button */}
       <div className="fixed bottom-6 right-6 z-40">
@@ -274,6 +272,6 @@ export default function Login() {
           Install App
         </button>
       </div>
- </div>
- );
+    </div>
+  );
 }
