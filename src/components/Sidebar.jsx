@@ -28,7 +28,7 @@ export default function Sidebar() {
 
  {/* Logo */}
  <div className="h-20 flex items-center px-6 border-b border-slate-50">
- <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#0088cc] to-[#00aaff] flex items-center justify-center text-white shrink-0 shadow-lg shadow-blue-500/20">
+ <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center text-white shrink-0 shadow-lg shadow-blue-500/20">
  <WalletCards size={20} strokeWidth={2.5} />
  </div>
  <AnimatePresence>
@@ -39,7 +39,7 @@ export default function Sidebar() {
  exit={{ opacity: 0, x: -10 }}
  className="ml-3 font-extrabold text-lg text-slate-800 tracking-tight"
  >
- Expense<span className="text-[#0088cc]">Sync</span>
+ Moroccan<span className="text-blue-600">Split</span>
  </motion.span>
  )}
  </AnimatePresence>
