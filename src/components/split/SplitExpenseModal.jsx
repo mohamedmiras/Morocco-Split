@@ -455,9 +455,11 @@ export default function SplitExpenseModal({ isOpen, onClose, onExpenseAdded, pre
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
-            className="bg-white rounded-[2rem] shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden relative z-10 flex flex-col border border-white/20"
+            className="bg-white rounded-[2rem] shadow-2xl w-full max-w-4xl h-[82dvh] sm:h-auto max-h-[82dvh] sm:max-h-[90vh] overflow-hidden relative z-10 flex flex-col border border-white/20"
           >
             {showSuccessAnim && <MoneyRain />}
+            {/* Mobile Sheet Drag Handle */}
+            <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto mt-3 shrink-0 sm:hidden" />
             {/* Header */}
             <div className="px-6 py-4 flex items-center justify-between border-b border-slate-100 bg-slate-50/50 shrink-0">
               <div className="flex items-center gap-3">
