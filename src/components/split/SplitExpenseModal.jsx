@@ -144,7 +144,7 @@ const MoneyRain = () => {
   );
 };
 
-export default function SplitExpenseModal({ isOpen, onClose, onExpenseAdded }) {
+export default function SplitExpenseModal({ isOpen, onClose, onExpenseAdded, preselectedGroupId, groupMembers }) {
   const user = useAuthStore((state) => state.user);
   
   const [totalAmount, setTotalAmount] = useState('');
@@ -153,8 +153,10 @@ export default function SplitExpenseModal({ isOpen, onClose, onExpenseAdded }) {
   const [notes, setNotes] = useState('');
   const [splitMode, setSplitMode] = useState('equal'); // 'equal', 'custom', 'separate'
   const [splitType, setSplitType] = useState('individual'); // 'individual', 'room'
+  const [groupId, setGroupId] = useState('');
   
   const [allProfiles, setAllProfiles] = useState([]);
+  const [userGroups, setUserGroups] = useState([]);
   const [participants, setParticipants] = useState([]);
   const [loading, setLoading] = useState(false);
   const [fetchingProfiles, setFetchingProfiles] = useState(false);
@@ -171,9 +173,15 @@ export default function SplitExpenseModal({ isOpen, onClose, onExpenseAdded }) {
           const querySnapshot = await getDocs(q);
           const profilesData = querySnapshot.docs.map(doc => ({id: doc.id, ...doc.data()}));
           setAllProfiles(profilesData);
+
+          if (!preselectedGroupId && user) {
+            const gQ = query(collection(db, 'groups'), where('memberUids', 'array-contains', user.student_id?.toString()));
+            const gSnap = await getDocs(gQ);
+            setUserGroups(gSnap.docs.map(doc => ({id: doc.id, ...doc.data()})));
+          }
         } catch (err) {
           console.error(err);
-          setError('Failed to load members.');
+          setError('Failed to load members or groups.');
         } finally {
           setFetchingProfiles(false);
         }
@@ -187,10 +195,11 @@ export default function SplitExpenseModal({ isOpen, onClose, onExpenseAdded }) {
       setNotes('');
       setSplitMode('equal');
       setSplitType('individual');
+      setGroupId(preselectedGroupId || '');
       setError('');
       setShowSuccessAnim(false);
     }
-  }, [isOpen]);
+  }, [isOpen, preselectedGroupId, user]);
 
   // Re-map participants whenever splitType or allProfiles changes
   useEffect(() => {
@@ -200,6 +209,28 @@ export default function SplitExpenseModal({ isOpen, onClose, onExpenseAdded }) {
         const loggedInStudentId = parseInt(user?.student_id);
         const GIRL_IDS = [6, 9, 16, 17, 29];
         const ALLOWED_BOY_IDS = [4, 18, 34];
+
+        if (groupId || preselectedGroupId) {
+          const activeGroupId = groupId || preselectedGroupId;
+          const targetGroup = preselectedGroupId ? { members: groupMembers } : userGroups.find(g => g.id === activeGroupId);
+          if (targetGroup && targetGroup.members) {
+            const initialParticipants = targetGroup.members.map(member => {
+              const profile = allProfiles.find(p => p.id === member.uid);
+              return {
+                id: member.uid,
+                student_id: profile ? parseInt(profile.student_id) : parseInt(member.uid),
+                name: member.name,
+                amount: 0,
+                selected: true,
+                isManuallyEdited: false,
+                weight: 1,
+                photoURL: profile ? (profile.photoURL || '') : ''
+              };
+            });
+            setParticipants(initialParticipants);
+            return;
+          }
+        }
 
         let filteredProfiles = allProfiles.filter(p => p.role !== 'room');
 
@@ -248,7 +279,7 @@ export default function SplitExpenseModal({ isOpen, onClose, onExpenseAdded }) {
         });
         setParticipants(initialParticipants);
     }
-  }, [splitType, allProfiles, user]);
+  }, [splitType, allProfiles, user, groupId, userGroups, preselectedGroupId, groupMembers]);
 
   // Recalculate splits when Total Amount, Split Mode, or Selections change
   useEffect(() => {
@@ -370,7 +401,7 @@ export default function SplitExpenseModal({ isOpen, onClose, onExpenseAdded }) {
  
        const newExpense = {
          total_amount: splitMode === 'separate' ? totalAssigned : finalTotal,
-         paid_by_uid: user.id,
+         paid_by_uid: (groupId || preselectedGroupId) ? user.student_id?.toString() : user.id,
          paid_by_name: formatName(user.name || 'Anonymous'),
          split_mode: splitMode,
          split_type: splitType,
@@ -379,6 +410,10 @@ export default function SplitExpenseModal({ isOpen, onClose, onExpenseAdded }) {
          date: date,
          participants: finalDbParticipants
        };
+
+       if (groupId) {
+         newExpense.groupId = groupId;
+       }
  
        // Run absolute math pre-save check
        const validation = validateSplitTotals(newExpense.total_amount, newExpense.participants);
@@ -444,29 +479,48 @@ export default function SplitExpenseModal({ isOpen, onClose, onExpenseAdded }) {
 
             <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
               
-              {/* Type Toggle - Only visible to Room accounts */}
-              {user?.role === 'room' && (
-                <div className="flex bg-slate-100/80 p-1 rounded-xl mb-4">
-                  <button
-                    type="button"
-                    onClick={() => setSplitType('individual')}
-                    className={`flex-1 py-2 text-[12px] font-bold rounded-lg transition-all flex items-center justify-center gap-2 ${
-                      splitType === 'individual' ? 'bg-white text-blue-600 shadow-sm border border-slate-200/50' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'
-                    }`}
-                  >
-                    <Users size={14} /> Individual Split
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setSplitType('room')}
-                    className={`flex-1 py-2 text-[12px] font-bold rounded-lg transition-all flex items-center justify-center gap-2 ${
-                      splitType === 'room' ? 'bg-white text-[#0088cc] shadow-sm border border-slate-200/50' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'
-                    }`}
-                  >
-                    <Home size={14} /> Room-Wise Split
-                  </button>
-                </div>
-              )}
+              {/* Type Toggle & Group Selector */}
+              <div className="flex flex-col sm:flex-row gap-4 mb-4">
+                {user?.role === 'room' && (
+                  <div className="flex bg-slate-100/80 p-1 rounded-xl flex-1">
+                    <button
+                      type="button"
+                      onClick={() => setSplitType('individual')}
+                      className={`flex-1 py-2 text-[12px] font-bold rounded-lg transition-all flex items-center justify-center gap-2 ${
+                        splitType === 'individual' ? 'bg-white text-blue-600 shadow-sm border border-slate-200/50' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'
+                      }`}
+                    >
+                      <Users size={14} /> Individual Split
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSplitType('room')}
+                      className={`flex-1 py-2 text-[12px] font-bold rounded-lg transition-all flex items-center justify-center gap-2 ${
+                        splitType === 'room' ? 'bg-white text-[#0088cc] shadow-sm border border-slate-200/50' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'
+                      }`}
+                    >
+                      <Home size={14} /> Room-Wise Split
+                    </button>
+                  </div>
+                )}
+                
+                {/* Group Selector */}
+                {!preselectedGroupId && splitType === 'individual' && userGroups.length > 0 && (
+                  <div className="flex-1">
+                    <label className="block text-[9px] font-semibold text-slate-400 uppercase tracking-wider mb-1.5 ml-0.5">Link to Group (Optional)</label>
+                    <select
+                      value={groupId}
+                      onChange={(e) => setGroupId(e.target.value)}
+                      className="w-full pl-3 pr-8 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all outline-none text-slate-800 font-bold text-[12px]"
+                    >
+                      <option value="">No Group (Global)</option>
+                      {userGroups.map(g => (
+                        <option key={g.id} value={g.id}>{g.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
 
               {/* Expense Details Grid */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">

@@ -22,6 +22,7 @@ export default function Dashboard() {
   const [isSplitModalOpen, setIsSplitModalOpen] = useState(false);
   
   const [expenses, setExpenses] = useState([]);
+  const [groups, setGroups] = useState([]);
   const [loadingExpenses, setLoadingExpenses] = useState(true);
   const [isEndorseModalOpen, setIsEndorseModalOpen] = useState(false);
   const [pendingEndorsements, setPendingEndorsements] = useState([]);
@@ -89,6 +90,28 @@ export default function Dashboard() {
     return () => unsub();
   }, [user]);
 
+  useEffect(() => {
+    if (!user) return;
+    const q = query(
+      collection(db, 'groups'),
+      where('memberUids', 'array-contains', user.student_id?.toString() || user.id?.toString())
+    );
+    const unsub = onSnapshot(q, (snapshot) => {
+      const fetched = [];
+      snapshot.forEach(doc => fetched.push({ id: doc.id, ...doc.data() }));
+      setGroups(fetched);
+    });
+    return () => unsub();
+  }, [user]);
+
+  const groupNameMap = useMemo(() => {
+    const map = {};
+    groups.forEach(g => {
+      map[g.id] = g.name;
+    });
+    return map;
+  }, [groups]);
+
   const formatDateToDMY = (dateStr) => {
     if (!dateStr || dateStr === 'Unknown Date') return dateStr;
     const parts = dateStr.split('-');
@@ -127,7 +150,7 @@ export default function Dashboard() {
           const isDocCompleted = exp.status === 'completed';
           const isDocPending = exp.status === 'pending_settlement';
 
-          const isPayer = exp.paid_by_uid === user.id || (user.role === 'room' && myRoomMemberNames.includes((exp.paid_by_name || '').toLowerCase()));
+          const isPayer = exp.paid_by_uid === user.id || exp.paid_by_uid === user.student_id?.toString() || (user.role === 'room' && myRoomMemberNames.includes((exp.paid_by_name || '').toLowerCase()));
           const desc = exp.description || 'Shared Expense';
 
           exp.participants?.forEach(p => {
@@ -135,7 +158,7 @@ export default function Dashboard() {
             if (!p.amount || p.amount <= 0) return;
 
             const isBorrowerRoomMember = user.role === 'room' && myRoomMemberNames.includes((p.name || '').toLowerCase());
-            const isBorrower = p.uid === user.id || isBorrowerRoomMember;
+            const isBorrower = p.uid === user.id || p.uid === user.student_id?.toString() || isBorrowerRoomMember;
 
             const isCompleted = p.status === 'completed' || isDocCompleted;
             const isPending = p.status === 'pending_settlement' || isDocPending;
@@ -175,6 +198,8 @@ export default function Dashboard() {
               txList.push({
                 id: `${exp.id}-${displayBorrowerUid}`,
                 description: desc,
+                isGroup: !!exp.groupId,
+                groupName: exp.groupId ? (groupNameMap[exp.groupId] || 'Group Expense') : null,
                 amount: p.amount,
                 type: 'owed',
                 date: formatDateToDMY(exp.date) || 'Unknown Date',
@@ -190,6 +215,8 @@ export default function Dashboard() {
               txList.push({
                 id: `${exp.id}-${user.id}`,
                 description: desc,
+                isGroup: !!exp.groupId,
+                groupName: exp.groupId ? (groupNameMap[exp.groupId] || 'Group Expense') : null,
                 amount: p.amount,
                 type: 'owe',
                 date: formatDateToDMY(exp.date) || 'Unknown Date',
@@ -237,7 +264,7 @@ export default function Dashboard() {
         individualStats: processExpenses('individual'),
         roomStats: processExpenses('room')
     };
-  }, [expenses, user]);
+  }, [expenses, user, groupNameMap]);
 
   const auditLogs = useMemo(() => {
     return expenses.map(exp => {
@@ -400,13 +427,13 @@ export default function Dashboard() {
         return isExpLender &&
           exp.status !== 'completed' && exp.status !== 'pending_settlement' &&
           exp.participants?.some(p => {
-            const isMe = p.uid === user.id || (user?.role === 'room' && myRoomMemberNames.includes((p.name || '').toLowerCase()));
+            const isMe = p.uid === user.id || p.uid === user.student_id?.toString() || (user?.role === 'room' && myRoomMemberNames.includes((p.name || '').toLowerCase()));
             return isMe && p.amount > 0 && p.status !== 'completed' && p.status !== 'pending_settlement';
           });
       });
       const updatePromises = originalExpenses.map(exp => {
         const updatedParticipants = exp.participants.map(p => {
-          const isMe = p.uid === user.id || (user?.role === 'room' && myRoomMemberNames.includes((p.name || '').toLowerCase()));
+          const isMe = p.uid === user.id || p.uid === user.student_id?.toString() || (user?.role === 'room' && myRoomMemberNames.includes((p.name || '').toLowerCase()));
           return isMe ? { ...p, status: 'pending_settlement' } : p;
         });
         return updateDoc(doc(db, 'expenses', exp.id), { participants: updatedParticipants });
@@ -429,7 +456,7 @@ export default function Dashboard() {
       }
 
       const originalExpenses = expenses.filter(exp => 
-        exp.paid_by_uid === user.id &&
+        (exp.paid_by_uid === user.id || exp.paid_by_uid === user.student_id?.toString()) &&
         exp.participants?.some(p => {
           const matches = isRoom 
             ? roomMembers.includes((p.name || '').toLowerCase())
@@ -505,9 +532,9 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="flex h-screen bg-slate-50 overflow-hidden font-sans">
+    <div className="flex h-[100dvh] bg-slate-50 overflow-hidden font-sans">
       <Sidebar />
-      <div className="flex-1 flex flex-col h-screen overflow-hidden">
+      <div className="flex-1 flex flex-col h-[100dvh] overflow-hidden">
         <Navbar />
         <main className="flex-1 overflow-y-auto p-4 md:p-8">
           <div className="max-w-5xl mx-auto space-y-10">
@@ -769,9 +796,9 @@ function DashboardCard({ title, amount, type, icon: Icon, details, pendingReques
                   const pendingOut = pendingRequests.find(p => p.lender_uid === item.uid);
                   if (pendingOut) {
                     actionUI = (
-                      <div className="mt-2 flex items-center gap-2 p-2 bg-slate-100 rounded-lg border border-slate-200">
-                        <Clock size={12} className="text-slate-400" />
-                        <span className="text-[10px] text-slate-500 font-semibold">Waiting for {item.name} to confirm</span>
+                      <div className="flex items-center gap-1 px-1.5 py-1 bg-slate-100 rounded-md border border-slate-200">
+                        <Clock size={10} className="text-slate-400" />
+                        <span className="text-[8px] text-slate-500 font-bold uppercase tracking-wider">Pending</span>
                       </div>
                     );
                   } else {
@@ -782,7 +809,7 @@ function DashboardCard({ title, amount, type, icon: Icon, details, pendingReques
                           e.stopPropagation();
                           runAnimatedAction(item.uid, () => onAction1 && onAction1(item.uid, item.name, item.amount));
                         }}
-                        className={`mt-2 w-full py-1.5 text-[10px] font-bold rounded-lg border flex items-center justify-center gap-1.5 transition-all shadow-sm ${
+                        className={`px-2 py-1 text-[9px] font-bold rounded-md border flex items-center justify-center gap-1 transition-all shadow-sm ${
                           state === 'processing' 
                             ? 'bg-slate-50 text-slate-400 border-slate-100 cursor-not-allowed'
                             : state === 'done'
@@ -793,7 +820,7 @@ function DashboardCard({ title, amount, type, icon: Icon, details, pendingReques
                       >
                         {state === 'processing' ? (
                           <>
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            <Loader2 className="w-3 h-3 animate-spin" />
                             Sending...
                           </>
                         ) : state === 'done' ? (
@@ -815,43 +842,38 @@ function DashboardCard({ title, amount, type, icon: Icon, details, pendingReques
                   const pendingIn = pendingRequests.find(p => p.borrower_uid === item.uid);
                   if (pendingIn) {
                     actionUI = (
-                      <div className="mt-2 p-2 bg-orange-50 rounded-lg border border-orange-100" onClick={(e) => e.stopPropagation()}>
-                        <p className="text-[9px] text-orange-600 font-semibold mb-1.5 leading-tight">
-                          {item.name} marked this as paid. Confirm?
-                        </p>
-                        <motion.button 
-                          disabled={state === 'processing' || state === 'done'}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            runAnimatedAction(item.uid, () => onAction1 && onAction1(item.uid));
-                          }}
-                          className={`w-full py-1 text-[10px] font-bold rounded-md flex items-center justify-center gap-1.5 transition-all shadow-sm ${
-                            state === 'processing'
-                              ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                              : state === 'done'
-                              ? 'bg-emerald-500 text-white'
-                              : 'bg-orange-500 text-white hover:bg-orange-600'
-                          }`}
-                          whileTap={{ scale: state === 'idle' ? 0.97 : 1 }}
-                        >
-                          {state === 'processing' ? (
-                            <>
-                              <Loader2 className="w-3 h-3 animate-spin" />
-                              Confirming...
-                            </>
-                          ) : state === 'done' ? (
-                            <motion.span 
-                              initial={{ scale: 0 }}
-                              animate={{ scale: 1 }}
-                              transition={{ type: 'spring', stiffness: 200, damping: 10 }}
-                            >
-                              Confirmed! ✅
-                            </motion.span>
-                          ) : (
-                            'Confirm Paid'
-                          )}
-                        </motion.button>
-                      </div>
+                      <motion.button 
+                        disabled={state === 'processing' || state === 'done'}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          runAnimatedAction(item.uid, () => onAction1 && onAction1(item.uid));
+                        }}
+                        className={`px-2 py-1 text-[9px] font-bold rounded-md flex items-center justify-center gap-1 transition-all shadow-sm ${
+                          state === 'processing'
+                            ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                            : state === 'done'
+                            ? 'bg-emerald-500 text-white'
+                            : 'bg-orange-500 text-white hover:bg-orange-600 border border-orange-600'
+                        }`}
+                        whileTap={{ scale: state === 'idle' ? 0.97 : 1 }}
+                      >
+                        {state === 'processing' ? (
+                          <>
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                            Confirming
+                          </>
+                        ) : state === 'done' ? (
+                          <motion.span 
+                            initial={{ scale: 0 }}
+                            animate={{ scale: 1 }}
+                            transition={{ type: 'spring', stiffness: 200, damping: 10 }}
+                          >
+                            Confirmed! ✅
+                          </motion.span>
+                        ) : (
+                          'Confirm Paid'
+                        )}
+                      </motion.button>
                     );
                   } else {
                     actionUI = (
@@ -861,7 +883,7 @@ function DashboardCard({ title, amount, type, icon: Icon, details, pendingReques
                           e.stopPropagation();
                           runAnimatedAction(item.uid, () => onAction2 && onAction2(item.uid, item.name, item.amount));
                         }}
-                        className={`mt-2 w-full py-1.5 text-[10px] font-bold rounded-lg border flex items-center justify-center gap-1.5 transition-all shadow-sm ${
+                        className={`px-2 py-1 text-[9px] font-bold rounded-md border flex items-center justify-center gap-1 transition-all shadow-sm ${
                           state === 'processing'
                             ? 'bg-slate-50 text-slate-400 border-slate-100 cursor-not-allowed'
                             : state === 'done'
@@ -872,7 +894,7 @@ function DashboardCard({ title, amount, type, icon: Icon, details, pendingReques
                       >
                         {state === 'processing' ? (
                           <>
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            <Loader2 className="w-3 h-3 animate-spin" />
                             Saving...
                           </>
                         ) : state === 'done' ? (
@@ -895,15 +917,15 @@ function DashboardCard({ title, amount, type, icon: Icon, details, pendingReques
                 }
 
                 return (
-                  <div key={idx} className="flex flex-col border-b border-slate-200/50 last:border-0 pb-3 last:pb-0" onClick={(e) => e.stopPropagation()}>
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-[11px] text-slate-600"><span className="font-extrabold text-slate-900">{item.name}</span></p>
-                        <p className="text-[9px] text-slate-400 font-medium mt-0.5">{item.desc}</p>
-                      </div>
-                      <p className="text-xs font-extrabold text-slate-900">{item.amount.toFixed(2)} <span className="text-[9px] text-slate-500 font-bold">DH</span></p>
+                  <div key={idx} className="flex items-start justify-between border-b border-slate-200/50 last:border-0 pb-3 last:pb-0" onClick={(e) => e.stopPropagation()}>
+                    <div className="pt-0.5">
+                      <p className="text-[11px] text-slate-600"><span className="font-extrabold text-slate-900">{item.name}</span></p>
+                      <p className="text-[9px] text-slate-400 font-medium mt-0.5">{item.desc}</p>
                     </div>
-                    {actionUI}
+                    <div className="flex flex-col items-end gap-1.5">
+                      <p className="text-xs font-extrabold text-slate-900">{item.amount.toFixed(2)} <span className="text-[9px] text-slate-500 font-bold">DH</span></p>
+                      {actionUI}
+                    </div>
                   </div>
                 );
               })}
@@ -938,9 +960,13 @@ function TransactionList({ title, transactions, showAll, setShowAll, isCompact }
                                 {tx.isSettled ? <Check size={14} strokeWidth={3} /> : (tx.type === 'owe' ? <TrendingDown size={14} /> : <TrendingUp size={14} />)}
                             </div>
                             <div className="min-w-0 flex-1">
-                                <p className="text-[11px] font-bold text-slate-800 truncate">{tx.description}</p>
+                                <p className="text-[11px] font-bold text-slate-800 truncate">
+                                    {tx.isGroup ? 'Group Expense' : tx.description}
+                                </p>
                                 <div className="flex items-center gap-2 mt-0.5">
-                                    <span className="text-[9px] font-semibold text-slate-400 truncate">{tx.person}</span>
+                                    <span className="text-[9px] font-semibold text-slate-400 truncate">
+                                        {tx.isGroup ? tx.groupName : tx.person}
+                                    </span>
                                     <span className="w-1 h-1 rounded-full bg-slate-200"></span>
                                     <span className="text-[9px] font-semibold text-slate-400 shrink-0">{tx.date}</span>
                                 </div>

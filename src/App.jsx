@@ -7,6 +7,8 @@ import { useAuthStore } from './store/authStore';
 
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
+import Groups from './pages/Groups';
+import GroupDashboard from './pages/GroupDashboard';
 
 // Simple Error Boundary
 class ErrorBoundary extends Component {
@@ -110,6 +112,8 @@ function App() {
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+            <Route path="/groups" element={<ProtectedRoute><Groups /></ProtectedRoute>} />
+            <Route path="/groups/:groupId" element={<ProtectedRoute><GroupDashboard /></ProtectedRoute>} />
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>
