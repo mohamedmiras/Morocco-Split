@@ -11,7 +11,7 @@ import ImageCropperModal from '../components/ImageCropperModal';
 import { useAuthStore } from '../store/authStore';
 import studentsData from '../data/students.json';
 import { db } from '../lib/firebase';
-import { collection, query, getDocs, orderBy, updateDoc, doc, setDoc, writeBatch, onSnapshot, where } from 'firebase/firestore';
+import { collection, query, getDocs, orderBy, updateDoc, doc, setDoc, writeBatch, onSnapshot, where, deleteDoc } from 'firebase/firestore';
 import { ROOM_DATA } from '../data/rooms';
 import imageCompression from 'browser-image-compression';
 import { safeRound, safeAdd, safeSubtract, safeSum } from '../lib/financialMath';
@@ -205,7 +205,8 @@ export default function Dashboard() {
                 date: formatDateToDMY(exp.date) || 'Unknown Date',
                 person: displayBorrowerName,
                 notes: exp.notes || '',
-                isSettled: isCompleted
+                isSettled: isCompleted,
+                originalExp: exp
               });
               if (!isCompleted) {
                 if (!balancesMap[displayBorrowerUid]) balancesMap[displayBorrowerUid] = { name: displayBorrowerName, netAmount: 0 };
@@ -222,7 +223,8 @@ export default function Dashboard() {
                 date: formatDateToDMY(exp.date) || 'Unknown Date',
                 person: displayLenderName,
                 notes: exp.notes || '',
-                isSettled: isCompleted
+                isSettled: isCompleted,
+                originalExp: exp
               });
               if (!isCompleted) {
                 if (!balancesMap[displayLenderUid]) balancesMap[displayLenderUid] = { name: displayLenderName, netAmount: 0 };
@@ -248,11 +250,24 @@ export default function Dashboard() {
           }
         });
 
+        // Group transactions by original expense ID to avoid duplicates
+        const groupedTxMap = {};
+        txList.forEach(tx => {
+          const expId = tx.originalExp?.id || tx.id;
+          if (!groupedTxMap[expId]) {
+            groupedTxMap[expId] = { ...tx, id: expId, amount: 0, isSettled: true };
+          }
+          groupedTxMap[expId].amount = safeAdd(groupedTxMap[expId].amount, tx.amount);
+          // Only mark as settled if ALL participant entries are settled
+          if (!tx.isSettled) groupedTxMap[expId].isSettled = false;
+        });
+        const groupedTxList = Object.values(groupedTxMap);
+
         return {
           totalOwe: finalOweSum,
           totalOwed: finalOwedSum,
           netBalance: safeSubtract(finalOwedSum, finalOweSum),
-          transactionsList: txList,
+          transactionsList: groupedTxList,
           oweDetails: finalOweArr,
           owedDetails: finalOwedArr,
           pendingIncoming: pendingIn,
@@ -645,6 +660,12 @@ export default function Dashboard() {
                     transactions={individualStats.transactionsList} 
                     showAll={showAllIndividualTransactions}
                     setShowAll={setShowAllIndividualTransactions}
+                    user={user}
+                    onDelete={async (expenseId) => {
+                      if (!window.confirm('Are you sure you want to delete this expense? This will remove it for all members.')) return;
+                      await deleteDoc(doc(db, 'expenses', expenseId));
+                      fetchExpenses();
+                    }}
                 />
             </div>
 
@@ -684,6 +705,12 @@ export default function Dashboard() {
                     showAll={showAllRoomTransactions}
                     setShowAll={setShowAllRoomTransactions}
                     isCompact={true}
+                    user={user}
+                    onDelete={async (expenseId) => {
+                      if (!window.confirm('Are you sure you want to delete this expense? This will remove it for all members.')) return;
+                      await deleteDoc(doc(db, 'expenses', expenseId));
+                      fetchExpenses();
+                    }}
                 />
             </div>
 
@@ -937,8 +964,10 @@ function DashboardCard({ title, amount, type, icon: Icon, details, pendingReques
   );
 }
 
-function TransactionList({ title, transactions, showAll, setShowAll, isCompact }) {
+function TransactionList({ title, transactions, showAll, setShowAll, isCompact, user, onDelete }) {
     const displayedTransactions = showAll ? transactions : transactions.slice(0, 3);
+    const [expandedTxId, setExpandedTxId] = useState(null);
+    const [deletingId, setDeletingId] = useState(null);
     
     return (
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className={`bg-white ${isCompact ? 'rounded-2xl p-4' : 'rounded-[2rem] p-6'} shadow-[0_8px_30px_rgb(0,0,0,0.02)] border border-slate-100`}>
@@ -954,30 +983,89 @@ function TransactionList({ title, transactions, showAll, setShowAll, isCompact }
                         <p className="text-[11px] font-semibold">No recent activity</p>
                     </div>
                 ) : displayedTransactions.map((tx, idx) => (
-                    <div key={idx} className={`flex items-center justify-between p-3 rounded-xl border ${tx.isSettled ? 'bg-slate-50/50 border-slate-100' : 'bg-white border-slate-100 shadow-sm'} hover:shadow-md transition-all group`}>
-                        <div className="flex items-center gap-3 w-full max-w-[60%]">
-                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${tx.isSettled ? 'bg-slate-100 text-slate-400' : (tx.type === 'owe' ? 'bg-red-50 text-red-500' : 'bg-emerald-50 text-emerald-500')}`}>
-                                {tx.isSettled ? <Check size={14} strokeWidth={3} /> : (tx.type === 'owe' ? <TrendingDown size={14} /> : <TrendingUp size={14} />)}
-                            </div>
-                            <div className="min-w-0 flex-1">
-                                <p className="text-[11px] font-bold text-slate-800 truncate">
-                                    {tx.isGroup ? 'Group Expense' : tx.description}
-                                </p>
-                                <div className="flex items-center gap-2 mt-0.5">
-                                    <span className="text-[9px] font-semibold text-slate-400 truncate">
-                                        {tx.isGroup ? tx.groupName : tx.person}
-                                    </span>
-                                    <span className="w-1 h-1 rounded-full bg-slate-200"></span>
-                                    <span className="text-[9px] font-semibold text-slate-400 shrink-0">{tx.date}</span>
+                    <div key={idx} onClick={() => setExpandedTxId(expandedTxId === tx.id ? null : tx.id)} className={`flex flex-col p-3 rounded-xl border cursor-pointer ${tx.isSettled ? 'bg-slate-50/50 border-slate-100' : 'bg-white border-slate-100 shadow-sm'} hover:shadow-md transition-all group`}>
+                        <div className="flex items-center justify-between w-full">
+                            <div className="flex items-center gap-3 w-full max-w-[60%]">
+                                <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${tx.isSettled ? 'bg-slate-100 text-slate-400' : (tx.type === 'owe' ? 'bg-red-50 text-red-500' : 'bg-emerald-50 text-emerald-500')}`}>
+                                    {tx.isSettled ? <Check size={14} strokeWidth={3} /> : (tx.type === 'owe' ? <TrendingDown size={14} /> : <TrendingUp size={14} />)}
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                    <p className="text-[11px] font-bold text-slate-800 truncate">
+                                        {tx.isGroup ? 'Group Expense' : tx.description}
+                                    </p>
+                                    <div className="flex items-center gap-2 mt-0.5">
+                                        <span className="text-[9px] font-semibold text-slate-400 truncate">
+                                            {tx.isGroup ? tx.groupName : tx.person}
+                                        </span>
+                                        <span className="w-1 h-1 rounded-full bg-slate-200"></span>
+                                        <span className="text-[9px] font-semibold text-slate-400 shrink-0">{tx.date}</span>
+                                    </div>
                                 </div>
                             </div>
+                            <div className="text-right pl-3 shrink-0 flex items-center gap-2">
+                                <div>
+                                    <p className={`text-[12px] font-black ${tx.isSettled ? 'text-slate-400' : (tx.type === 'owe' ? 'text-red-500' : 'text-emerald-500')}`}>
+                                        {tx.type === 'owe' ? '-' : '+'}{tx.amount.toFixed(2)} <span className="text-[9px]">DH</span>
+                                    </p>
+                                    {tx.isSettled && <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">Repaid</p>}
+                                </div>
+                                <ChevronDown size={14} className={`text-slate-400 transition-transform ${expandedTxId === tx.id ? 'rotate-180' : ''}`} />
+                            </div>
                         </div>
-                        <div className="text-right pl-3 shrink-0">
-                            <p className={`text-[12px] font-black ${tx.isSettled ? 'text-slate-400' : (tx.type === 'owe' ? 'text-red-500' : 'text-emerald-500')}`}>
-                                {tx.type === 'owe' ? '-' : '+'}{tx.amount.toFixed(2)} <span className="text-[9px]">DH</span>
-                            </p>
-                            {tx.isSettled && <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">Repaid</p>}
-                        </div>
+
+                        <AnimatePresence>
+                            {expandedTxId === tx.id && tx.originalExp && (
+                                <motion.div
+                                    initial={{ height: 0, opacity: 0 }}
+                                    animate={{ height: 'auto', opacity: 1 }}
+                                    exit={{ height: 0, opacity: 0 }}
+                                    className="overflow-hidden mt-3 pt-3 border-t border-slate-100"
+                                >
+                                    <div className="space-y-2">
+                                        <p className="text-[10px] font-semibold text-slate-500">
+                                            <span className="text-slate-800 font-bold">{tx.originalExp.paid_by_name}</span> paid <span className="font-bold text-slate-800">{parseFloat(tx.originalExp.total_amount || tx.originalExp.amount || 0).toFixed(2)} DH</span>
+                                        </p>
+                                        <div className="bg-slate-50 rounded-lg p-2 space-y-1">
+                                            {tx.originalExp.participants?.map((p, i) => {
+                                                const isPayer = p.uid === tx.originalExp.paid_by_uid;
+                                                const isParticipantPaid = isPayer || p.status === 'completed' || tx.originalExp.status === 'completed';
+                                                return (
+                                                <div key={i} className="flex items-center justify-between text-[10px]">
+                                                    <span className="font-medium text-slate-600">{p.name}</span>
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="font-bold text-slate-700">{parseFloat(p.amount).toFixed(2)} DH</span>
+                                                        {isParticipantPaid ? (
+                                                            <span className="text-emerald-500 flex items-center gap-0.5"><Check size={10} /> Paid</span>
+                                                        ) : (
+                                                            <span className="text-orange-500">Pending</span>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+
+                                    {/* Delete button - only visible to the payer */}
+                                    {onDelete && user && (tx.originalExp.paid_by_uid === user.id || tx.originalExp.paid_by_uid === user.student_id?.toString()) && (
+                                        <div className="mt-3 pt-2 border-t border-slate-100 flex justify-end">
+                                            <button
+                                                disabled={deletingId === tx.originalExp.id}
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setDeletingId(tx.originalExp.id);
+                                                    onDelete(tx.originalExp.id).finally(() => setDeletingId(null));
+                                                }}
+                                                className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 text-[10px] font-bold rounded-lg border border-red-100 transition-all flex items-center gap-1.5 disabled:opacity-50"
+                                            >
+                                                {deletingId === tx.originalExp.id ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+                                                Delete Expense
+                                            </button>
+                                        </div>
+                                    )}
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
                     </div>
                 ))}
             </div>

@@ -6,7 +6,7 @@ import Navbar from '../components/Navbar';
 import Sidebar from '../components/Sidebar';
 import { useAuthStore } from '../store/authStore';
 import { db } from '../lib/firebase';
-import { doc, collection, query, where, onSnapshot, orderBy } from 'firebase/firestore';
+import { doc, collection, query, where, onSnapshot, orderBy, deleteDoc } from 'firebase/firestore';
 import GroupMembersGrid from '../components/groups/GroupMembersGrid';
 import GroupActivityFeed from '../components/groups/GroupActivityFeed';
 import SplitExpenseModal from '../components/split/SplitExpenseModal';
@@ -234,7 +234,14 @@ export default function GroupDashboard() {
 
             <div className="space-y-6">
               <GroupMembersGrid members={group.members} balances={memberBalances} />
-              <GroupActivityFeed expenses={expenses} />
+              <GroupActivityFeed 
+                expenses={expenses} 
+                user={user}
+                onDelete={async (expenseId) => {
+                  if (!window.confirm('Are you sure you want to delete this expense? This will remove it for all group members.')) return;
+                  await deleteDoc(doc(db, 'expenses', expenseId));
+                }}
+              />
             </div>
 
           </div>
