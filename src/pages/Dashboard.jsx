@@ -470,15 +470,19 @@ export default function Dashboard() {
         roomMembers = rData ? rData.members.map(m => m.toLowerCase()) : [];
       }
 
-      const originalExpenses = expenses.filter(exp => 
-        (exp.paid_by_uid === user.id || exp.paid_by_uid === user.student_id?.toString()) &&
+      const myRoom = user?.role === 'room' ? ROOM_DATA.find(r => r.roomNo === user.roomNo) : null;
+      const myRoomMemberNames = myRoom ? myRoom.members.map(m => m.toLowerCase()) : [];
+
+      const originalExpenses = expenses.filter(exp => {
+        const isPayer = exp.paid_by_uid === user.id || exp.paid_by_uid === user.student_id?.toString() || (user?.role === 'room' && myRoomMemberNames.includes((exp.paid_by_name || '').toLowerCase()));
+        return isPayer &&
         exp.participants?.some(p => {
           const matches = isRoom 
             ? roomMembers.includes((p.name || '').toLowerCase())
             : p.uid === borrowerUid;
           return matches && p.status === 'pending_settlement';
-        })
-      );
+        });
+      });
       const updatePromises = originalExpenses.map(exp => {
         const updatedParticipants = exp.participants.map(p => {
           const matches = isRoom 
@@ -505,16 +509,20 @@ export default function Dashboard() {
         roomMembers = rData ? rData.members.map(m => m.toLowerCase()) : [];
       }
 
-      const originalExpenses = expenses.filter(exp => 
-        exp.paid_by_uid === user.id &&
+      const myRoom = user?.role === 'room' ? ROOM_DATA.find(r => r.roomNo === user.roomNo) : null;
+      const myRoomMemberNames = myRoom ? myRoom.members.map(m => m.toLowerCase()) : [];
+
+      const originalExpenses = expenses.filter(exp => {
+        const isPayer = exp.paid_by_uid === user.id || exp.paid_by_uid === user.student_id?.toString() || (user?.role === 'room' && myRoomMemberNames.includes((exp.paid_by_name || '').toLowerCase()));
+        return isPayer &&
         exp.status !== 'completed' && exp.status !== 'pending_settlement' &&
         exp.participants?.some(p => {
           const matches = isRoom 
             ? roomMembers.includes((p.name || '').toLowerCase())
             : p.uid === borrowerUid;
           return matches && p.amount > 0 && p.status !== 'completed';
-        })
-      );
+        });
+      });
       const updatePromises = originalExpenses.map(exp => {
         const updatedParticipants = exp.participants.map(p => {
           const matches = isRoom 
