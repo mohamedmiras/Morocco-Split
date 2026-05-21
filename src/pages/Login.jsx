@@ -8,9 +8,9 @@ import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'fire
 import { collection, query, where, getDocs, doc, setDoc } from '../lib/firestoreWrapper';
 import studentsData from '../data/students.json';
 
-export default function Login() {
- const [studentId, setStudentId] = useState('13');
- const [password, setPassword] = useState('');
+ export default function Login() {
+  const [studentId, setStudentId] = useState('');
+  const [password, setPassword] = useState('');
  const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [networkStatus, setNetworkStatus] = useState('checking'); // 'checking', 'ok', 'blocked'
