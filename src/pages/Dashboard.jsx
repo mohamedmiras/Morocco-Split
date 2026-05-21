@@ -823,9 +823,17 @@ function DashboardCard({ title, amount, type, icon: Icon, details, pendingReques
             style={{ willChange: 'height, opacity', transform: 'translateZ(0)' }}
           >
             <div className="border-t border-slate-100 p-4 space-y-3">
-              {details.length === 0 ? (
-                <p className="text-xs text-slate-400 text-center font-medium py-2">No active balances</p>
-              ) : details.map((item, idx) => {
+              <AnimatePresence mode="popLayout">
+                {details.length === 0 ? (
+                  <motion.p 
+                    initial={{ opacity: 0 }} 
+                    animate={{ opacity: 1 }} 
+                    exit={{ opacity: 0 }} 
+                    className="text-xs text-slate-400 text-center font-medium py-2"
+                  >
+                    No active balances
+                  </motion.p>
+                ) : details.map((item) => {
                 let actionUI = null;
                 const state = processingState[item.uid] || 'idle';
 
@@ -954,7 +962,15 @@ function DashboardCard({ title, amount, type, icon: Icon, details, pendingReques
                 }
 
                 return (
-                  <div key={idx} className="flex items-start justify-between border-b border-slate-200/50 last:border-0 pb-3 last:pb-0" onClick={(e) => e.stopPropagation()}>
+                  <motion.div 
+                    key={item.uid} 
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0, paddingBottom: 0, paddingTop: 0, borderBottomWidth: 0 }}
+                    transition={{ duration: 0.3, ease: [0.04, 0.62, 0.23, 0.98] }}
+                    className="flex items-start justify-between border-b border-slate-200/50 last:border-0 pb-3 last:pb-0 overflow-hidden" 
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     <div className="pt-0.5">
                       <p className="text-[11px] text-slate-600"><span className="font-extrabold text-slate-900">{item.name}</span></p>
                       <p className="text-[9px] text-slate-400 font-medium mt-0.5">{item.desc}</p>
@@ -963,9 +979,10 @@ function DashboardCard({ title, amount, type, icon: Icon, details, pendingReques
                       <p className="text-xs font-extrabold text-slate-900">{item.amount.toFixed(2)} <span className="text-[9px] text-slate-500 font-bold">DH</span></p>
                       {actionUI}
                     </div>
-                  </div>
+                  </motion.div>
                 );
               })}
+              </AnimatePresence>
             </div>
           </motion.div>
         )}
