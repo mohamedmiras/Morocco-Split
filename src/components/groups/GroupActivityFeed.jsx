@@ -79,6 +79,7 @@ export default function GroupActivityFeed({ expenses, user, onDelete }) {
                               exit={{ height: 0, opacity: 0 }}
                               transition={{ duration: 0.3, ease: [0.04, 0.62, 0.23, 0.98] }}
                               className="overflow-hidden"
+                              style={{ willChange: 'height, opacity', transform: 'translateZ(0)' }}
                           >
                               <div className="mt-2 pt-2 border-t border-slate-100 pl-14">
                                 <div className="bg-slate-50 rounded-lg p-2 space-y-1">
@@ -113,6 +114,7 @@ export default function GroupActivityFeed({ expenses, user, onDelete }) {
                               exit={{ height: 0, opacity: 0 }}
                               transition={{ duration: 0.3, ease: [0.04, 0.62, 0.23, 0.98] }}
                               className="overflow-hidden"
+                              style={{ willChange: 'height, opacity', transform: 'translateZ(0)' }}
                           >
                               <div className="pl-14 pt-2 flex justify-end">
                                   <button

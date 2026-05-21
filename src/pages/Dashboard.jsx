@@ -547,11 +547,11 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="flex h-[100dvh] bg-slate-50 overflow-hidden font-sans">
+    <div className="flex h-[100svh] bg-slate-50 overflow-hidden font-sans">
       <Sidebar />
-      <div className="flex-1 flex flex-col h-[100dvh] overflow-hidden">
+      <div className="flex-1 flex flex-col h-[100svh] overflow-hidden">
         <Navbar />
-        <main className="flex-1 overflow-y-auto p-4 md:p-8">
+        <main className="flex-1 overflow-y-auto p-4 md:p-8" style={{ transform: 'translateZ(0)' }}>
           <div className="max-w-5xl mx-auto space-y-10">
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="flex items-center justify-between">
               <div>
@@ -735,7 +735,7 @@ export default function Dashboard() {
       />
 
       {/* Add to Home Screen Button */}
-      <div className="fixed bottom-6 right-6 z-40">
+      <div className="fixed bottom-6 right-6 z-40 transform-gpu" style={{ transform: 'translateZ(0)' }}>
         <button
           onClick={handleInstallApp}
           className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-xl shadow-[0_8px_30px_rgb(37,99,235,0.3)] hover:bg-blue-700 hover:shadow-[0_8px_30px_rgb(37,99,235,0.4)] hover:-translate-y-0.5 active:translate-y-0 transition-all text-[11px] font-black border border-blue-500 cursor-pointer"
@@ -812,6 +812,7 @@ function DashboardCard({ title, amount, type, icon: Icon, details, pendingReques
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.3, ease: [0.04, 0.62, 0.23, 0.98] }}
             className="overflow-hidden bg-slate-50/50"
+            style={{ willChange: 'height, opacity', transform: 'translateZ(0)' }}
           >
             <div className="border-t border-slate-100 p-4 space-y-3">
               {details.length === 0 ? (
@@ -1022,6 +1023,7 @@ function TransactionList({ title, transactions, showAll, setShowAll, isCompact, 
                                     exit={{ height: 0, opacity: 0 }}
                                     transition={{ duration: 0.3, ease: [0.04, 0.62, 0.23, 0.98] }}
                                     className="overflow-hidden"
+                                    style={{ willChange: 'height, opacity', transform: 'translateZ(0)' }}
                                 >
                                     <div className="mt-3 pt-3 border-t border-slate-100 space-y-2">
                                         <p className="text-[10px] font-semibold text-slate-500">
