@@ -140,7 +140,12 @@ export default function Dashboard() {
         const pendingIn = [];
         const pendingOut = [];
 
-        const myRoom = user.role === 'room' ? ROOM_DATA.find(r => r.roomNo === user.roomNo) : null;
+        let myRoom = null;
+        if (user.role === 'room') {
+            myRoom = ROOM_DATA.find(r => r.roomNo === user.roomNo);
+        } else {
+            myRoom = ROOM_DATA.find(r => r.members.some(m => m.toLowerCase() === (user.name || '').toLowerCase()));
+        }
         const myRoomMemberNames = myRoom ? myRoom.members.map(m => m.toLowerCase()) : [];
 
         expenses.forEach(exp => {
@@ -150,15 +155,25 @@ export default function Dashboard() {
           const isDocCompleted = exp.status === 'completed';
           const isDocPending = exp.status === 'pending_settlement';
 
-          const isPayer = exp.paid_by_uid === user.id || exp.paid_by_uid === user.student_id?.toString() || (user.role === 'room' && myRoomMemberNames.includes((exp.paid_by_name || '').toLowerCase()));
+          let isPayer = false;
+          if (targetSplitType === 'room') {
+             isPayer = exp.paid_by_uid === user.id || exp.paid_by_uid === user.student_id?.toString() || (myRoom && exp.paid_by_uid === `room-${myRoom.roomNo}`) || myRoomMemberNames.includes((exp.paid_by_name || '').toLowerCase());
+          } else {
+             isPayer = exp.paid_by_uid === user.id || exp.paid_by_uid === user.student_id?.toString();
+          }
+
           const desc = exp.description || 'Shared Expense';
 
           exp.participants?.forEach(p => {
             if (p.uid === exp.paid_by_uid) return; 
             if (!p.amount || p.amount <= 0) return;
 
-            const isBorrowerRoomMember = user.role === 'room' && myRoomMemberNames.includes((p.name || '').toLowerCase());
-            const isBorrower = p.uid === user.id || p.uid === user.student_id?.toString() || isBorrowerRoomMember;
+            let isBorrower = false;
+            if (targetSplitType === 'room') {
+               isBorrower = p.uid === user.id || p.uid === user.student_id?.toString() || (myRoom && p.uid === `room-${myRoom.roomNo}`) || myRoomMemberNames.includes((p.name || '').toLowerCase());
+            } else {
+               isBorrower = p.uid === user.id || p.uid === user.student_id?.toString();
+            }
 
             const isCompleted = p.status === 'completed' || isDocCompleted;
             const isPending = p.status === 'pending_settlement' || isDocPending;
@@ -431,10 +446,17 @@ export default function Dashboard() {
         lenderRoomMembers = rData ? rData.members.map(m => m.toLowerCase()) : [];
       }
 
-      const myRoom = user?.role === 'room' ? ROOM_DATA.find(r => r.roomNo === user.roomNo) : null;
+      let myRoom = null;
+      if (user?.role === 'room') {
+          myRoom = ROOM_DATA.find(r => r.roomNo === user.roomNo);
+      } else if (user) {
+          myRoom = ROOM_DATA.find(r => r.members.some(m => m.toLowerCase() === (user.name || '').toLowerCase()));
+      }
       const myRoomMemberNames = myRoom ? myRoom.members.map(m => m.toLowerCase()) : [];
 
       const originalExpenses = expenses.filter(exp => {
+        const currentSplitType = exp.split_type || 'individual';
+        
         const isExpLender = isLenderRoom 
           ? (exp.paid_by_name === `Room ${lenderRoomNo}` || lenderRoomMembers.includes((exp.paid_by_name || '').toLowerCase()))
           : exp.paid_by_uid === lenderUid;
@@ -442,13 +464,24 @@ export default function Dashboard() {
         return isExpLender &&
           exp.status !== 'completed' && exp.status !== 'pending_settlement' &&
           exp.participants?.some(p => {
-            const isMe = p.uid === user.id || p.uid === user.student_id?.toString() || (user?.role === 'room' && myRoomMemberNames.includes((p.name || '').toLowerCase()));
+            let isMe = false;
+            if (currentSplitType === 'room') {
+                isMe = p.uid === user.id || p.uid === user.student_id?.toString() || (myRoom && p.uid === `room-${myRoom.roomNo}`) || myRoomMemberNames.includes((p.name || '').toLowerCase());
+            } else {
+                isMe = p.uid === user.id || p.uid === user.student_id?.toString();
+            }
             return isMe && p.amount > 0 && p.status !== 'completed' && p.status !== 'pending_settlement';
           });
       });
       const updatePromises = originalExpenses.map(exp => {
+        const currentSplitType = exp.split_type || 'individual';
         const updatedParticipants = exp.participants.map(p => {
-          const isMe = p.uid === user.id || p.uid === user.student_id?.toString() || (user?.role === 'room' && myRoomMemberNames.includes((p.name || '').toLowerCase()));
+            let isMe = false;
+            if (currentSplitType === 'room') {
+                isMe = p.uid === user.id || p.uid === user.student_id?.toString() || (myRoom && p.uid === `room-${myRoom.roomNo}`) || myRoomMemberNames.includes((p.name || '').toLowerCase());
+            } else {
+                isMe = p.uid === user.id || p.uid === user.student_id?.toString();
+            }
           return isMe ? { ...p, status: 'pending_settlement' } : p;
         });
         return updateDoc(doc(db, 'expenses', exp.id), { participants: updatedParticipants });
@@ -470,11 +503,23 @@ export default function Dashboard() {
         roomMembers = rData ? rData.members.map(m => m.toLowerCase()) : [];
       }
 
-      const myRoom = user?.role === 'room' ? ROOM_DATA.find(r => r.roomNo === user.roomNo) : null;
+      let myRoom = null;
+      if (user?.role === 'room') {
+          myRoom = ROOM_DATA.find(r => r.roomNo === user.roomNo);
+      } else if (user) {
+          myRoom = ROOM_DATA.find(r => r.members.some(m => m.toLowerCase() === (user.name || '').toLowerCase()));
+      }
       const myRoomMemberNames = myRoom ? myRoom.members.map(m => m.toLowerCase()) : [];
 
       const originalExpenses = expenses.filter(exp => {
-        const isPayer = exp.paid_by_uid === user.id || exp.paid_by_uid === user.student_id?.toString() || (user?.role === 'room' && myRoomMemberNames.includes((exp.paid_by_name || '').toLowerCase()));
+        const currentSplitType = exp.split_type || 'individual';
+        let isPayer = false;
+        if (currentSplitType === 'room') {
+            isPayer = exp.paid_by_uid === user.id || exp.paid_by_uid === user.student_id?.toString() || (myRoom && exp.paid_by_uid === `room-${myRoom.roomNo}`) || myRoomMemberNames.includes((exp.paid_by_name || '').toLowerCase());
+        } else {
+            isPayer = exp.paid_by_uid === user.id || exp.paid_by_uid === user.student_id?.toString();
+        }
+        
         return isPayer &&
         exp.participants?.some(p => {
           const matches = isRoom 
@@ -509,11 +554,23 @@ export default function Dashboard() {
         roomMembers = rData ? rData.members.map(m => m.toLowerCase()) : [];
       }
 
-      const myRoom = user?.role === 'room' ? ROOM_DATA.find(r => r.roomNo === user.roomNo) : null;
+      let myRoom = null;
+      if (user?.role === 'room') {
+          myRoom = ROOM_DATA.find(r => r.roomNo === user.roomNo);
+      } else if (user) {
+          myRoom = ROOM_DATA.find(r => r.members.some(m => m.toLowerCase() === (user.name || '').toLowerCase()));
+      }
       const myRoomMemberNames = myRoom ? myRoom.members.map(m => m.toLowerCase()) : [];
 
       const originalExpenses = expenses.filter(exp => {
-        const isPayer = exp.paid_by_uid === user.id || exp.paid_by_uid === user.student_id?.toString() || (user?.role === 'room' && myRoomMemberNames.includes((exp.paid_by_name || '').toLowerCase()));
+        const currentSplitType = exp.split_type || 'individual';
+        let isPayer = false;
+        if (currentSplitType === 'room') {
+            isPayer = exp.paid_by_uid === user.id || exp.paid_by_uid === user.student_id?.toString() || (myRoom && exp.paid_by_uid === `room-${myRoom.roomNo}`) || myRoomMemberNames.includes((exp.paid_by_name || '').toLowerCase());
+        } else {
+            isPayer = exp.paid_by_uid === user.id || exp.paid_by_uid === user.student_id?.toString();
+        }
+
         return isPayer &&
         exp.status !== 'completed' && exp.status !== 'pending_settlement' &&
         exp.participants?.some(p => {
