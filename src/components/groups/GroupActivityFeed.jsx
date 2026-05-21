@@ -77,9 +77,11 @@ export default function GroupActivityFeed({ expenses, user, onDelete }) {
                               initial={{ height: 0, opacity: 0 }}
                               animate={{ height: 'auto', opacity: 1 }}
                               exit={{ height: 0, opacity: 0 }}
-                              className="overflow-hidden mt-2 pt-2 border-t border-slate-100 pl-14"
+                              transition={{ duration: 0.3, ease: [0.04, 0.62, 0.23, 0.98] }}
+                              className="overflow-hidden"
                           >
-                              <div className="bg-slate-50 rounded-lg p-2 space-y-1">
+                              <div className="mt-2 pt-2 border-t border-slate-100 pl-14">
+                                <div className="bg-slate-50 rounded-lg p-2 space-y-1">
                                   {exp.participants.map((p, i) => {
                                       const isPayer = p.uid === exp.paid_by_uid;
                                       const isParticipantPaid = isPayer || p.status === 'completed' || exp.status === 'completed';
@@ -98,6 +100,7 @@ export default function GroupActivityFeed({ expenses, user, onDelete }) {
                                       );
                                   })}
                               </div>
+                            </div>
                           </motion.div>
                       )}
                   </AnimatePresence>
@@ -108,9 +111,10 @@ export default function GroupActivityFeed({ expenses, user, onDelete }) {
                               initial={{ height: 0, opacity: 0 }}
                               animate={{ height: 'auto', opacity: 1 }}
                               exit={{ height: 0, opacity: 0 }}
-                              className="overflow-hidden pl-14"
+                              transition={{ duration: 0.3, ease: [0.04, 0.62, 0.23, 0.98] }}
+                              className="overflow-hidden"
                           >
-                              <div className="pt-2 flex justify-end">
+                              <div className="pl-14 pt-2 flex justify-end">
                                   <button
                                       disabled={deletingId === exp.id}
                                       onClick={(e) => {

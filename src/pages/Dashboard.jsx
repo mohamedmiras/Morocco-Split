@@ -810,9 +810,10 @@ function DashboardCard({ title, amount, type, icon: Icon, details, pendingReques
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            className="overflow-hidden bg-slate-50/50 border-t border-slate-100"
+            transition={{ duration: 0.3, ease: [0.04, 0.62, 0.23, 0.98] }}
+            className="overflow-hidden bg-slate-50/50"
           >
-            <div className="p-4 space-y-3">
+            <div className="border-t border-slate-100 p-4 space-y-3">
               {details.length === 0 ? (
                 <p className="text-xs text-slate-400 text-center font-medium py-2">No active balances</p>
               ) : details.map((item, idx) => {
@@ -1019,9 +1020,10 @@ function TransactionList({ title, transactions, showAll, setShowAll, isCompact, 
                                     initial={{ height: 0, opacity: 0 }}
                                     animate={{ height: 'auto', opacity: 1 }}
                                     exit={{ height: 0, opacity: 0 }}
-                                    className="overflow-hidden mt-3 pt-3 border-t border-slate-100"
+                                    transition={{ duration: 0.3, ease: [0.04, 0.62, 0.23, 0.98] }}
+                                    className="overflow-hidden"
                                 >
-                                    <div className="space-y-2">
+                                    <div className="mt-3 pt-3 border-t border-slate-100 space-y-2">
                                         <p className="text-[10px] font-semibold text-slate-500">
                                             <span className="text-slate-800 font-bold">{tx.originalExp.paid_by_name}</span> paid <span className="font-bold text-slate-800">{parseFloat(tx.originalExp.total_amount || tx.originalExp.amount || 0).toFixed(2)} DH</span>
                                         </p>
