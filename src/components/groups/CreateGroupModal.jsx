@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, Users, Search, Check, Loader2 } from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
 import { db } from '../../lib/firebase';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp } from '../../lib/firestoreWrapper';
 import studentsData from '../../data/students.json';
 import { ROOM_DATA } from '../../data/rooms';
 

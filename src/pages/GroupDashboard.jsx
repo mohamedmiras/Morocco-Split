@@ -6,7 +6,7 @@ import Navbar from '../components/Navbar';
 import Sidebar from '../components/Sidebar';
 import { useAuthStore } from '../store/authStore';
 import { db } from '../lib/firebase';
-import { doc, collection, query, where, onSnapshot, orderBy, deleteDoc } from 'firebase/firestore';
+import { doc, collection, query, where, onSnapshot, orderBy, deleteDoc } from '../lib/firestoreWrapper';
 import GroupMembersGrid from '../components/groups/GroupMembersGrid';
 import GroupActivityFeed from '../components/groups/GroupActivityFeed';
 import SplitExpenseModal from '../components/split/SplitExpenseModal';

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, ArrowRightLeft, UserMinus, UserPlus, AlertCircle, Loader2 } from 'lucide-react';
 import { db } from '../../lib/firebase';
-import { collection, addDoc, serverTimestamp, query, where, onSnapshot } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, query, where, onSnapshot } from '../../lib/firestoreWrapper';
 import { useAuthStore } from '../../store/authStore';
 
 export default function EndorseDebtModal({ isOpen, onClose, oweDetails, owedDetails, onEndorseRequested }) {

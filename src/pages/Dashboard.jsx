@@ -11,7 +11,7 @@ import ImageCropperModal from '../components/ImageCropperModal';
 import { useAuthStore } from '../store/authStore';
 import studentsData from '../data/students.json';
 import { db } from '../lib/firebase';
-import { collection, query, getDocs, orderBy, updateDoc, doc, setDoc, writeBatch, onSnapshot, where, deleteDoc } from 'firebase/firestore';
+import { collection, query, getDocs, orderBy, updateDoc, doc, setDoc, writeBatch, onSnapshot, where, deleteDoc } from '../lib/firestoreWrapper';
 import { ROOM_DATA } from '../data/rooms';
 import imageCompression from 'browser-image-compression';
 import { safeRound, safeAdd, safeSubtract, safeSum } from '../lib/financialMath';

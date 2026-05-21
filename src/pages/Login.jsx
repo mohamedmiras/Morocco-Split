@@ -5,7 +5,7 @@ import { LogIn, KeyRound, Loader2, WalletCards, User, Download } from 'lucide-re
 import { useAuthStore } from '../store/authStore';
 import { auth, db } from '../lib/firebase';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
-import { collection, query, where, getDocs, doc, setDoc } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, setDoc } from '../lib/firestoreWrapper';
 import studentsData from '../data/students.json';
 
 export default function Login() {

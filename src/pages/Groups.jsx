@@ -6,7 +6,7 @@ import Navbar from '../components/Navbar';
 import Sidebar from '../components/Sidebar';
 import { useAuthStore } from '../store/authStore';
 import { db } from '../lib/firebase';
-import { collection, query, where, getDocs, orderBy, onSnapshot } from 'firebase/firestore';
+import { collection, query, where, getDocs, orderBy, onSnapshot } from '../lib/firestoreWrapper';
 import CreateGroupModal from '../components/groups/CreateGroupModal';
 
 export default function Groups() {

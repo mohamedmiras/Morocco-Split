@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, KeyRound, Loader2, CheckCircle2, AlertCircle, Save, Camera, Trash2, User } from 'lucide-react';
 import { auth, db } from '../lib/firebase';
 import { updatePassword } from 'firebase/auth';
-import { doc, setDoc } from 'firebase/firestore';
+import { doc, setDoc } from '../lib/firestoreWrapper';
 import { useAuthStore } from '../store/authStore';
 import imageCompression from 'browser-image-compression';
 import ImageCropperModal from './ImageCropperModal';

@@ -2,13 +2,15 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { useEffect, useState, Component } from 'react';
 import { auth, db } from './lib/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc } from './lib/firestoreWrapper';
+import { isDemoMode } from './lib/demoData';
 import { useAuthStore } from './store/authStore';
 
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Groups from './pages/Groups';
 import GroupDashboard from './pages/GroupDashboard';
+import Preview from './pages/Preview';
 
 // Simple Error Boundary
 class ErrorBoundary extends Component {
@@ -61,8 +63,10 @@ function App() {
   useEffect(() => {
     const updateUserData = async (firebaseUser) => {
       if (!firebaseUser) {
-        setUser(null);
-        setAuthenticated(false);
+        if (!isDemoMode) {
+          setUser(null);
+          setAuthenticated(false);
+        }
         setLoading(false);
         return;
       }
@@ -115,6 +119,7 @@ function App() {
             <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
             <Route path="/groups" element={<ProtectedRoute><Groups /></ProtectedRoute>} />
             <Route path="/groups/:groupId" element={<ProtectedRoute><GroupDashboard /></ProtectedRoute>} />
+            <Route path="/preview" element={<Preview />} />
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>
