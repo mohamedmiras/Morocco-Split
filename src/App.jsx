@@ -99,6 +99,7 @@ function App() {
 
     setLoading(true);
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      setLoading(true);
       await updateUserData(firebaseUser);
     });
 

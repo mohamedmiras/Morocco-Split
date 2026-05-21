@@ -134,12 +134,8 @@ export default function Login() {
       }
       
       clearTimeout(timeoutId);
-
-      // Trigger a small artificial delay so the UI feels smooth
-      setTimeout(() => {
-        setLoading(false);
-        navigate('/dashboard');
-      }, 500);
+      // We rely on the useEffect listening to 'isAuthenticated' to navigate.
+      // This prevents the race condition where we navigate before the global auth state is ready.
       
     } catch (err) {
       clearTimeout(timeoutId);
